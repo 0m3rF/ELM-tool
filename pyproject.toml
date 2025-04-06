@@ -1,0 +1,18 @@
+[project]
+name = "elm-tool"
+version = "0.0.1"
+description = "Extract, Load and Mask Tool for Database Operations"
+authors = [{name = "Ömer Faruk Kırlı", email = "omerfarukkirli@gmail.com"}]
+dependencies = [
+    "click>=8.0.0",
+    "cryptography>=3.4.7",
+    "psycopg2-binary>=2.9.1",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+elm-tool = "elm_tool.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
