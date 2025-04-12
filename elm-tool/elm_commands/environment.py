@@ -1,9 +1,43 @@
 import click
 import os
+import sys
+import subprocess
 import configparser
 from elm_utils import variables, encryption
 
 config = configparser.ConfigParser()
+
+# Database-specific dependencies
+DB_PACKAGES = {
+    "ORACLE": "cx_oracle",
+    "MYSQL": "pymysql",
+    "MSSQL": "pyodbc",
+    "POSTGRES": "psycopg2-binary"
+}
+
+def ensure_db_driver_installed(db_type):
+    """Ensure that the required database driver is installed"""
+    if db_type not in DB_PACKAGES:
+        return
+
+    package_name = DB_PACKAGES[db_type]
+
+    # Check if the package is already installed
+    try:
+        if package_name == "psycopg2-binary":
+            __import__("psycopg2")
+        else:
+            __import__(package_name.replace('-', '_').split('>')[0])
+        return  # Package is already installed
+    except ImportError:
+        # Package is not installed, try to install it
+        print(f"Installing required database driver: {package_name}")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+            print(f"Successfully installed {package_name}")
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to install {package_name}: {str(e)}")
+            print(f"Please install {package_name} manually using: pip install {package_name}")
 
 class AliasedGroup(click.Group):
     def get_command(self, ctx, cmd_name):
@@ -15,7 +49,20 @@ class AliasedGroup(click.Group):
 
 @click.group(cls=AliasedGroup)
 def environment():
-    """Environment management commands"""
+    """Environment management commands.
+
+    This group contains commands for managing database environments.
+    Use these commands to create, list, show, update, delete, and test
+    database connection environments.
+
+    Examples:
+
+        List all available commands:
+          elm-tool environment --help
+
+        List all environments:
+          elm-tool environment list
+    """
     pass
 
 
@@ -27,11 +74,26 @@ def environment():
 @click.option("-P", "--password", required=True, help="Password of the environment")
 @click.option("-s", "--service", required=True, help="Service of the environment")
 @click.option("-t", "--type", required=True, type=click.Choice(['ORACLE', 'POSTGRES', 'MYSQL', 'MSSQL'], case_sensitive=False),  help="Type of the environment")
-@click.option("-o", "--overwrite", is_flag=True, default= False, help="Overwrites existing environment definition")
-@click.option("-e", "--encrypt", is_flag=True, default= False, help="Overwrites existing environment definition")
+@click.option("-o", "--overwrite", is_flag=True, default= False, help="Overwrite existing environment definition")
+@click.option("-e", "--encrypt", is_flag=True, default= False, help="Encrypt sensitive environment information")
 @click.option("-k", "--encryption-key", required=False, help="The key to use for encryption. Required if --encrypt is used. Unused if no encrypt has given.")
 def create(name, host, port, user, password, service, type, overwrite, encrypt, encryption_key ):
-    """Create a new environment"""
+    """Create a new environment.
+
+    Examples:
+
+        Create a PostgreSQL environment:
+          elm-tool environment create --name dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres
+
+        Create an Oracle environment:
+          elm-tool environment create --name prod-ora --host oraserver --port 1521 --user system --password oracle --service XE --type oracle
+
+        Create an encrypted MySQL environment:
+          elm-tool environment create --name secure-mysql --host dbserver --port 3306 --user root --password secret --service mysql --type mysql --encrypt --encryption-key mypassword
+
+        Create an environment and overwrite if it already exists:
+          elm-tool environment create --name dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres --overwrite
+    """
     if encrypt and not encryption_key:
         # Raise an error if --encrypt is True but --encryption-key is missing
         raise click.UsageError("Option '--encryption-key' / '-k' is required when using '--encrypt' / '-e'.")
@@ -44,7 +106,7 @@ def create(name, host, port, user, password, service, type, overwrite, encrypt, 
     config.read(variables.ENVS_FILE)
 
     if name in config and not overwrite:
-        raise click.UsageError("Name is already exists. To overwrite use '-o' / '--overwrite' exisisting environment definition.")
+        raise click.UsageError("Name is already exists. To overwrite use '-o' / '--overwrite' existing environment definition.")
     else:
         config[name] = {}
 
@@ -74,7 +136,7 @@ def create(name, host, port, user, password, service, type, overwrite, encrypt, 
         config.write(configfile)
         configfile.close()
 
-    print("environment create sucsessfully")
+    print("Environment created successfully")
 
 @environment.command()
 @click.option("-a", "--all", is_flag=True, default=False, help="Show all content of the environment")
@@ -85,7 +147,22 @@ def create(name, host, port, user, password, service, type, overwrite, encrypt, 
 @click.option("-s", "--service", is_flag=True, default=False, help="Show service of the environment")
 @click.option("-t", "--type", is_flag=True, default=False, help="Show type of the environment")
 def list(all, host, port, user, password, service, type):
-    """List all environments"""
+    """List all environments.
+
+    Examples:
+
+        List all environments:
+          elm-tool environment list
+
+        Show all details of all environments:
+          elm-tool environment list --all
+
+        Show only host and port information:
+          elm-tool environment list --host --port
+
+        Show specific information (user and service):
+          elm-tool environment list --user --service
+    """
     config.read(variables.ENVS_FILE)
 
     if not config.sections():
@@ -116,7 +193,16 @@ def list(all, host, port, user, password, service, type):
 @environment.command()
 @click.option("-n", "--name", required=True, help="Name of the environment to delete")
 def delete(name):
-    """Remove a system environment"""
+    """Remove a system environment.
+
+    Examples:
+
+        Delete an environment:
+          elm-tool environment delete --name dev-pg
+
+        Using the alias with the same option:
+          elm-tool environment rm --name old-env
+    """
     config.read(variables.ENVS_FILE)
 
     if (not name in config.sections()):
@@ -133,7 +219,18 @@ def delete(name):
 @click.option("-n", "--name", required=True, help="Name of the environment to show")
 @click.option("-k", "--encryption-key", required=False, help="The key to decrypt the environment if it's encrypted")
 def show(name, encryption_key):
-    """Show a system environment"""
+    """Show a system environment.
+
+    Examples:
+        Show an environment:
+          elm-tool environment show --name dev-pg
+
+        Show an encrypted environment:
+          elm-tool environment show --name secure-env --encryption-key mypassword
+
+        Using the inspect alias:
+          elm-tool environment inspect --name dev-pg
+    """
     config.read(variables.ENVS_FILE)
 
     if (not name in config.sections()):
@@ -182,7 +279,25 @@ def show(name, encryption_key):
 @click.option("-e", "--encrypt", is_flag=True, default=False, help="Encrypt the environment")
 @click.option("-k", "--encryption-key", required=False, help="The key to use for encryption. Required if --encrypt is used.")
 def update(name, host, port, user, password, service, type, encrypt, encryption_key):
-    """Update a system environment"""
+    """Update a system environment.
+
+    Examples:
+
+        Update the host and port of an environment:
+          elm-tool environment update --name dev-pg --host new-host --port 5433
+
+        Update the password:
+          elm-tool environment update --name prod-ora --password new-password
+
+        Encrypt an existing environment:
+          elm-tool environment update --name dev-mysql --encrypt --encryption-key mypassword
+
+        Update multiple fields at once:
+          elm-tool environment update --name dev-pg --host new-host --port 5433 --user new-user
+
+        Using the edit alias:
+          elm-tool environment edit --name dev-pg --host new-host
+    """
     # Check if encryption key is provided when encrypt flag is set
     if encrypt and not encryption_key:
         raise click.UsageError("Option '--encryption-key' / '-k' is required when using '--encrypt' / '-e'.")
@@ -292,10 +407,30 @@ def update(name, host, port, user, password, service, type, encrypt, encryption_
     print(f"Environment '{name}' updated successfully")
 
 @environment.command()
-@click.option("-n", "--name", required=True, help="Name of the environment to test")
+@click.argument('name', required=False)
+@click.option("-n", "--name", required=False, help="Name of the environment to test")
 @click.option("-k", "--encryption-key", required=False, help="The key to decrypt the environment if it's encrypted")
-def test(name, encryption_key):
-    """Test a system environment by attempting to connect to the database"""
+def test(name, name_option=None, encryption_key=None):
+    """Test a system environment by attempting to connect to the database.
+
+    Examples:
+
+        Test a database connection:
+          elm-tool environment test --name dev-pg
+
+        Test using positional argument:
+          elm-tool environment test dev-pg
+
+        Test an encrypted environment connection:
+          elm-tool environment test --name secure-mysql --encryption-key mypassword
+
+        Using the validate alias:
+          elm-tool environment validate --name dev-pg
+    """
+    # Use the name from the option if provided, otherwise use the positional argument
+    env_name = name_option if name_option else name
+    if not env_name:
+        raise click.UsageError("Environment name is required. Use --name option or provide it as an argument.")
     from sqlalchemy import create_engine
     from sqlalchemy.exc import SQLAlchemyError
 
@@ -303,20 +438,20 @@ def test(name, encryption_key):
     config.read(variables.ENVS_FILE)
 
     # Check if the environment exists
-    if not name in config.sections():
-        raise click.UsageError(f"Environment '{name}' not found")
+    if not env_name in config.sections():
+        raise click.UsageError(f"Environment '{env_name}' not found")
 
     # Check if the environment is encrypted
-    is_encrypted = config[name].get("is_encrypted", 'False') == 'True'
+    is_encrypted = config[env_name].get("is_encrypted", 'False') == 'True'
 
     # Get environment details
     if is_encrypted:
         if not encryption_key:
-            raise click.UsageError(f"Environment '{name}' is encrypted. Provide an encryption key to test it.")
+            raise click.UsageError(f"Environment '{env_name}' is encrypted. Provide an encryption key to test it.")
 
         try:
             # Decrypt the environment
-            decrypted_env = encryption.decrypt_environment(dict(config[name]), encryption_key)
+            decrypted_env = encryption.decrypt_environment(dict(config[env_name]), encryption_key)
 
             # Get decrypted details
             env_type = decrypted_env["type"].upper()
@@ -329,12 +464,15 @@ def test(name, encryption_key):
             raise click.UsageError(f"Failed to decrypt environment: {str(e)}. Check your encryption key.")
     else:
         # Get unencrypted details
-        env_type = config[name]["type"].upper()
-        host = config[name]["host"]
-        port = config[name]["port"]
-        user = config[name]["user"]
-        password = config[name]["password"]
-        service = config[name]["service"]
+        env_type = config[env_name]["type"].upper()
+        host = config[env_name]["host"]
+        port = config[env_name]["port"]
+        user = config[env_name]["user"]
+        password = config[env_name]["password"]
+        service = config[env_name]["service"]
+
+    # Ensure the required database driver is installed
+    ensure_db_driver_installed(env_type)
 
     # Create connection URL based on database type
     connection_url = None
