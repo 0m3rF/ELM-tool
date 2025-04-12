@@ -1,5 +1,6 @@
 venv_elm_tool/
 .vscode
+.*pyc
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
