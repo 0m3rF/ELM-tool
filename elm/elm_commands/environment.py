@@ -58,16 +58,16 @@ def environment():
     Examples:
 
         List all available commands:
-          elm-tool environment --help
+          elm environment --help
 
         List all environments:
-          elm-tool environment list
+          elm environment list
     """
     pass
 
 
 @environment.command()
-@click.option("-n", "--name", required=True, help="Name of the environment")
+@click.argument('name')
 @click.option("-h", "--host", required=True, help="Host of the environment")
 @click.option("-p", "--port", required=True, help="Port of the environment", type=int)
 @click.option("-u", "--user", required=True, help="User of the environment")
@@ -83,17 +83,21 @@ def create(name, host, port, user, password, service, type, overwrite, encrypt, 
     Examples:
 
         Create a PostgreSQL environment:
-          elm-tool environment create --name dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres
+          elm environment create dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres
 
         Create an Oracle environment:
-          elm-tool environment create --name prod-ora --host oraserver --port 1521 --user system --password oracle --service XE --type oracle
+          elm environment create prod-ora --host oraserver --port 1521 --user system --password oracle --service XE --type oracle
 
         Create an encrypted MySQL environment:
-          elm-tool environment create --name secure-mysql --host dbserver --port 3306 --user root --password secret --service mysql --type mysql --encrypt --encryption-key mypassword
+          elm environment create secure-mysql --host dbserver --port 3306 --user root --password secret --service mysql --type mysql --encrypt --encryption-key mypassword
 
         Create an environment and overwrite if it already exists:
-          elm-tool environment create --name dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres --overwrite
+          elm environment create dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres --overwrite
     """
+
+    if name == "*":
+        raise click.UsageError("Cannot use '*' as environment name.")
+
     if encrypt and not encryption_key:
         # Raise an error if --encrypt is True but --encryption-key is missing
         raise click.UsageError("Option '--encryption-key' / '-k' is required when using '--encrypt' / '-e'.")
@@ -152,16 +156,16 @@ def list(all, host, port, user, password, service, type):
     Examples:
 
         List all environments:
-          elm-tool environment list
+          elm environment list
 
         Show all details of all environments:
-          elm-tool environment list --all
+          elm environment list --all
 
         Show only host and port information:
-          elm-tool environment list --host --port
+          elm environment list --host --port
 
         Show specific information (user and service):
-          elm-tool environment list --user --service
+          elm environment list --user --service
     """
     config.read(variables.ENVS_FILE)
 
@@ -191,17 +195,17 @@ def list(all, host, port, user, password, service, type):
         print("")
 
 @environment.command()
-@click.option("-n", "--name", required=True, help="Name of the environment to delete")
+@click.argument('name')
 def delete(name):
     """Remove a system environment.
 
     Examples:
 
         Delete an environment:
-          elm-tool environment delete --name dev-pg
+          elm environment delete dev-pg
 
-        Using the alias with the same option:
-          elm-tool environment rm --name old-env
+        Using the alias:
+          elm environment rm old-env
     """
     config.read(variables.ENVS_FILE)
 
@@ -216,20 +220,20 @@ def delete(name):
 
 
 @environment.command()
-@click.option("-n", "--name", required=True, help="Name of the environment to show")
+@click.argument('name')
 @click.option("-k", "--encryption-key", required=False, help="The key to decrypt the environment if it's encrypted")
 def show(name, encryption_key):
     """Show a system environment.
 
     Examples:
         Show an environment:
-          elm-tool environment show --name dev-pg
+          elm environment show dev-pg
 
         Show an encrypted environment:
-          elm-tool environment show --name secure-env --encryption-key mypassword
+          elm environment show secure-env --encryption-key mypassword
 
         Using the inspect alias:
-          elm-tool environment inspect --name dev-pg
+          elm environment inspect dev-pg
     """
     config.read(variables.ENVS_FILE)
 
@@ -269,7 +273,7 @@ def show(name, encryption_key):
             print(f"Failed to decrypt environment: {str(e)}. Check your encryption key.")
 
 @environment.command()
-@click.option("-n", "--name", required=True, help="Name of the environment to update")
+@click.argument('name')
 @click.option("-h", "--host", required=False, help="Host of the environment")
 @click.option("-p", "--port", required=False, help="Port of the environment", type=int)
 @click.option("-u", "--user", required=False, help="User of the environment")
@@ -284,19 +288,19 @@ def update(name, host, port, user, password, service, type, encrypt, encryption_
     Examples:
 
         Update the host and port of an environment:
-          elm-tool environment update --name dev-pg --host new-host --port 5433
+          elm environment update dev-pg --host new-host --port 5433
 
         Update the password:
-          elm-tool environment update --name prod-ora --password new-password
+          elm environment update prod-ora --password new-password
 
         Encrypt an existing environment:
-          elm-tool environment update --name dev-mysql --encrypt --encryption-key mypassword
+          elm environment update dev-mysql --encrypt --encryption-key mypassword
 
         Update multiple fields at once:
-          elm-tool environment update --name dev-pg --host new-host --port 5433 --user new-user
+          elm environment update dev-pg --host new-host --port 5433 --user new-user
 
         Using the edit alias:
-          elm-tool environment edit --name dev-pg --host new-host
+          elm environment edit dev-pg --host new-host
     """
     # Check if encryption key is provided when encrypt flag is set
     if encrypt and not encryption_key:
@@ -407,30 +411,24 @@ def update(name, host, port, user, password, service, type, encrypt, encryption_
     print(f"Environment '{name}' updated successfully")
 
 @environment.command()
-@click.argument('name', required=False)
-@click.option("-n", "--name", required=False, help="Name of the environment to test")
+@click.argument('name')
 @click.option("-k", "--encryption-key", required=False, help="The key to decrypt the environment if it's encrypted")
-def test(name, name_option=None, encryption_key=None):
+def test(name, encryption_key=None):
     """Test a system environment by attempting to connect to the database.
 
     Examples:
 
         Test a database connection:
-          elm-tool environment test --name dev-pg
-
-        Test using positional argument:
-          elm-tool environment test dev-pg
+          elm environment test dev-pg
 
         Test an encrypted environment connection:
-          elm-tool environment test --name secure-mysql --encryption-key mypassword
+          elm environment test secure-mysql --encryption-key mypassword
 
         Using the validate alias:
-          elm-tool environment validate --name dev-pg
+          elm environment validate dev-pg
     """
-    # Use the name from the option if provided, otherwise use the positional argument
-    env_name = name_option if name_option else name
-    if not env_name:
-        raise click.UsageError("Environment name is required. Use --name option or provide it as an argument.")
+    # Use the name directly as it's now a required argument
+    env_name = name
     from sqlalchemy import create_engine
     from sqlalchemy.exc import SQLAlchemyError
 
