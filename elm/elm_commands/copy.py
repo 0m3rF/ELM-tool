@@ -4,7 +4,7 @@ import configparser
 import concurrent.futures
 import json
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.exc import SQLAlchemyError
 from elm_utils import variables, encryption
 
@@ -184,6 +184,60 @@ def process_in_parallel(func, items, max_workers):
                 click.echo(f"Error processing {item}: {str(e)}")
     return results
 
+def check_table_exists(connection_url, table_name):
+    """Check if a table exists in the database"""
+    try:
+        engine = create_engine(connection_url)
+        inspector = inspect(engine)
+        return inspector.has_table(table_name)
+    except SQLAlchemyError as e:
+        raise click.UsageError(f"Database error while checking table existence: {str(e)}")
+    except Exception as e:
+        raise click.UsageError(f"Error checking table existence: {str(e)}")
+
+def get_table_columns(connection_url, table_name):
+    """Get the column names of a table"""
+    try:
+        engine = create_engine(connection_url)
+        inspector = inspect(engine)
+        if not inspector.has_table(table_name):
+            return None
+        columns = inspector.get_columns(table_name)
+        return [column['name'].lower() for column in columns]
+    except SQLAlchemyError as e:
+        raise click.UsageError(f"Database error while getting table columns: {str(e)}")
+    except Exception as e:
+        raise click.UsageError(f"Error getting table columns: {str(e)}")
+
+def validate_target_table(source_data, target_url, table_name, create_if_not_exists=False):
+    """Validate that the target table exists and has all required columns"""
+    # Check if table exists
+    if not check_table_exists(target_url, table_name):
+        if create_if_not_exists:
+            # Create the table based on source data
+            try:
+                engine = create_engine(target_url)
+                source_data.head(0).to_sql(table_name, engine, if_exists='fail', index=False)
+                click.echo(f"Created table {table_name} in target database")
+                return True
+            except Exception as e:
+                raise click.UsageError(f"Failed to create table {table_name}: {str(e)}")
+        else:
+            raise click.UsageError(f"Target table {table_name} does not exist. Use --create-if-not-exists to create it.")
+
+    # Check if all source columns exist in target
+    source_columns = set(source_data.columns.str.lower())
+    target_columns = set(get_table_columns(target_url, table_name))
+
+    if not target_columns:
+        raise click.UsageError(f"Could not retrieve columns for target table {table_name}")
+
+    missing_columns = source_columns - target_columns
+    if missing_columns:
+        raise click.UsageError(f"Target table {table_name} is missing columns: {', '.join(missing_columns)}")
+
+    return True
+
 @copy.command()
 @click.option("-s", "--source", required=True, help="Source environment name")
 @click.option("-q", "--query", required=True, help="SQL query to extract data")
@@ -282,7 +336,9 @@ def db2file(source, query, file, format, mode, batch_size, parallel, encryption_
 @click.option("-b", "--batch-size", type=int, default=None, help="Batch size for processing large datasets")
 @click.option("-p", "--parallel", type=int, default=1, help="Number of parallel processes")
 @click.option("-k", "--encryption-key", required=False, help="Encryption key for encrypted environments")
-def file2db(source, target, table, format, mode, batch_size, parallel, encryption_key):
+@click.option("--validate-target", is_flag=True, help="Validate that target table exists and has all required columns")
+@click.option("--create-if-not-exists", is_flag=True, help="Create target table if it doesn't exist")
+def file2db(source, target, table, format, mode, batch_size, parallel, encryption_key, validate_target, create_if_not_exists):
     """Copy data from file to database"""
     try:
         # Get connection URL
@@ -298,6 +354,12 @@ def file2db(source, target, table, format, mode, batch_size, parallel, encryptio
             'FAIL': 'fail'
         }
         if_exists = if_exists_map[mode.upper()]
+
+        # Validate target table if requested
+        if validate_target:
+            click.echo(f"Validating target table {table}...")
+            validate_target_table(data, connection_url, table, create_if_not_exists)
+            click.echo(f"Target table validation successful")
 
         if parallel > 1 and batch_size and len(data) > batch_size:
             # Split data into batches
@@ -329,7 +391,9 @@ def file2db(source, target, table, format, mode, batch_size, parallel, encryptio
 @click.option("-p", "--parallel", type=int, default=1, help="Number of parallel processes")
 @click.option("-sk", "--source-key", required=False, help="Encryption key for source environment")
 @click.option("-tk", "--target-key", required=False, help="Encryption key for target environment")
-def db2db(source, target, query, table, mode, batch_size, parallel, source_key, target_key):
+@click.option("--validate-target", is_flag=True, help="Validate that target table exists and has all required columns")
+@click.option("--create-if-not-exists", is_flag=True, help="Create target table if it doesn't exist")
+def db2db(source, target, query, table, mode, batch_size, parallel, source_key, target_key, validate_target, create_if_not_exists):
     """Copy data from one database to another"""
     try:
         # Get connection URLs
@@ -343,6 +407,22 @@ def db2db(source, target, query, table, mode, batch_size, parallel, source_key, 
             'FAIL': 'fail'
         }
         if_exists = if_exists_map[mode.upper()]
+
+        # For validation, we need to get a sample of the data first
+        if validate_target:
+            click.echo(f"Fetching sample data for validation...")
+            # Get a small sample of the data to validate schema
+            sample_query = f"{query} LIMIT 1"
+            try:
+                sample_data = execute_query(source_url, sample_query)
+                if len(sample_data) > 0:
+                    click.echo(f"Validating target table {table}...")
+                    validate_target_table(sample_data, target_url, table, create_if_not_exists)
+                    click.echo(f"Target table validation successful")
+                else:
+                    click.echo(f"Warning: No sample data available for validation")
+            except Exception as e:
+                raise click.UsageError(f"Error during validation: {str(e)}")
 
         if parallel > 1 and batch_size:
             # Execute query to get total count for pagination
@@ -398,14 +478,14 @@ def db2db(source, target, query, table, mode, batch_size, parallel, source_key, 
         click.echo(f"Error: {str(e)}")
 
 @copy.command()
-@click.option("-e", "--environment", required=True, help="Environment name")
+@click.argument('name')
 @click.option("-q", "--query", required=True, help="SQL query to execute")
 @click.option("-k", "--encryption-key", required=False, help="Encryption key for encrypted environments")
-def execute(environment, query, encryption_key):
+def execute(name, query, encryption_key):
     """Execute a SQL query on a database"""
     try:
         # Get connection URL
-        connection_url = get_connection_url(environment, encryption_key)
+        connection_url = get_connection_url(name, encryption_key)
 
         # Execute the query
         engine = create_engine(connection_url)
