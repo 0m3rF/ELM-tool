@@ -1,5 +1,5 @@
 import click, os
-from elm_commands import environment, mask, copy
+from elm_commands import environment, mask, copy, generate
 from elm_utils import venv, variables
 
 def ensure_env_dir():
@@ -16,6 +16,7 @@ def cli():
 cli.add_command(environment.environment)
 cli.add_command(copy.copy)
 cli.add_command(mask.mask)
+cli.add_command(generate.generate)
 
 if __name__ == '__main__':
     venv.create_and_activate_venv(variables.VENV_DIR)
