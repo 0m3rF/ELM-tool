@@ -4,10 +4,9 @@ import configparser
 import concurrent.futures
 import json
 import pandas as pd
-from sqlalchemy import create_engine, inspect
-from sqlalchemy.exc import SQLAlchemyError
-from elm_utils import variables, encryption
-from elm_commands.mask import apply_masking
+from elm_utils import variables
+from elm_utils.data_utils import apply_masking
+from elm_utils.db_utils import get_connection_url, check_table_exists, get_table_columns, execute_query, write_to_db, write_to_file
 
 # Read the environment configuration
 config = configparser.ConfigParser()
@@ -25,59 +24,10 @@ def copy():
     """Data copy commands for database operations"""
     pass
 
-def get_connection_url(env_name, encryption_key=None):
-    """Get a SQLAlchemy connection URL for the specified environment"""
-    config.read(variables.ENVS_FILE)
-
-    # Check if the environment exists
-    if not env_name in config.sections():
-        raise click.UsageError(f"Environment '{env_name}' not found")
-
-    # Check if the environment is encrypted
-    is_encrypted = config[env_name].get("is_encrypted", 'False') == 'True'
-
-    # Get environment details
-    if is_encrypted:
-        if not encryption_key:
-            raise click.UsageError(f"Environment '{env_name}' is encrypted. Provide an encryption key.")
-
-        try:
-            # Decrypt the environment
-            decrypted_env = encryption.decrypt_environment(dict(config[env_name]), encryption_key)
-
-            # Get decrypted details
-            env_type = decrypted_env["type"].upper()
-            host = decrypted_env["host"]
-            port = decrypted_env["port"]
-            user = decrypted_env["user"]
-            password = decrypted_env["password"]
-            service = decrypted_env["service"]
-        except Exception as e:
-            raise click.UsageError(f"Failed to decrypt environment: {str(e)}. Check your encryption key.")
-    else:
-        # Get unencrypted details
-        env_type = config[env_name]["type"].upper()
-        host = config[env_name]["host"]
-        port = config[env_name]["port"]
-        user = config[env_name]["user"]
-        password = config[env_name]["password"]
-        service = config[env_name]["service"]
-
-    # Create connection URL based on database type
-    if env_type == "ORACLE":
-        # Oracle connection string format
-        return f"oracle+cx_oracle://{user}:{password}@{host}:{port}/{service}"
-    elif env_type == "POSTGRES":
-        # PostgreSQL connection string format
-        return f"postgresql://{user}:{password}@{host}:{port}/{service}"
-    elif env_type == "MYSQL":
-        # MySQL connection string format
-        return f"mysql+pymysql://{user}:{password}@{host}:{port}/{service}"
-    elif env_type == "MSSQL":
-        # MSSQL connection string format
-        return f"mssql+pyodbc://{user}:{password}@{host}:{port}/{service}?driver=ODBC+Driver+17+for+SQL+Server"
-    else:
-        raise click.UsageError(f"Unsupported database type: {env_type}")
+# Import modules for backward compatibility
+from elm_utils import encryption
+from sqlalchemy import create_engine, inspect
+from sqlalchemy.exc import SQLAlchemyError
 
 def execute_query(connection_url, query, batch_size=None, environment=None, apply_mask=True):
     """Execute a query and return the results"""

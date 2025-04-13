@@ -283,6 +283,8 @@ def test(column, value, environment):
     else:
         click.echo(f"Unknown masking algorithm: {algorithm}")
 
+
+
 # Define command aliases
 ALIASES = {
     "a": add,
