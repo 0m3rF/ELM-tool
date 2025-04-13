@@ -22,7 +22,7 @@ mssql = ["pyodbc>=4.0.34"]
 all-db = ["psycopg2-binary>=2.9.1", "cx_oracle>=8.3.0", "pymysql>=1.0.2", "pyodbc>=4.0.34"]
 
 [project.scripts]
-elm-tool = "elm_tool.cli:main"
+elm = "elm_tool.cli:main"
 
 [build-system]
 requires = ["hatchling"]
