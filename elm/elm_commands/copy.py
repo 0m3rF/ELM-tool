@@ -330,9 +330,9 @@ def db2file(source, query, file, format, mode, batch_size, parallel, encryption_
 @copy.command()
 @click.option("-s", "--source", required=True, help="Source file path")
 @click.option("-t", "--target", required=True, help="Target environment name")
-@click.option("-a", "--table", required=True, help="Target table name")
+@click.option("-T", "--table", required=True, help="Target table name")
 @click.option("-f", "--format", type=click.Choice(['CSV', 'JSON'], case_sensitive=False), default='CSV', help="Input file format")
-@click.option("-m", "--mode", type=click.Choice(['APPEND', 'REPLACE', 'FAIL'], case_sensitive=False), default='APPEND', help="Table write mode")
+@click.option("-m", "--mode", type=click.Choice(['APPEND', 'OVEWRITE', 'FAIL'], case_sensitive=False), default='APPEND', help="Table write mode")
 @click.option("-b", "--batch-size", type=int, default=None, help="Batch size for processing large datasets")
 @click.option("-p", "--parallel", type=int, default=1, help="Number of parallel processes")
 @click.option("-k", "--encryption-key", required=False, help="Encryption key for encrypted environments")
@@ -350,7 +350,7 @@ def file2db(source, target, table, format, mode, batch_size, parallel, encryptio
         # Map mode to SQLAlchemy if_exists parameter
         if_exists_map = {
             'APPEND': 'append',
-            'REPLACE': 'replace',
+            'OVEWRITE': 'overwrite',
             'FAIL': 'fail'
         }
         if_exists = if_exists_map[mode.upper()]
@@ -385,8 +385,8 @@ def file2db(source, target, table, format, mode, batch_size, parallel, encryptio
 @click.option("-s", "--source", required=True, help="Source environment name")
 @click.option("-t", "--target", required=True, help="Target environment name")
 @click.option("-q", "--query", required=True, help="SQL query to extract data from source")
-@click.option("-a", "--table", required=True, help="Target table name")
-@click.option("-m", "--mode", type=click.Choice(['APPEND', 'REPLACE', 'FAIL'], case_sensitive=False), default='APPEND', help="Table write mode")
+@click.option("-T", "--table", required=True, help="Target table name")
+@click.option("-m", "--mode", type=click.Choice(['APPEND', 'OVEWRITE', 'FAIL'], case_sensitive=False), default='APPEND', help="Table write mode")
 @click.option("-b", "--batch-size", type=int, default=None, help="Batch size for processing large datasets")
 @click.option("-p", "--parallel", type=int, default=1, help="Number of parallel processes")
 @click.option("-sk", "--source-key", required=False, help="Encryption key for source environment")
@@ -403,7 +403,7 @@ def db2db(source, target, query, table, mode, batch_size, parallel, source_key, 
         # Map mode to SQLAlchemy if_exists parameter
         if_exists_map = {
             'APPEND': 'append',
-            'REPLACE': 'replace',
+            'OVEWRITE': 'overwrite',
             'FAIL': 'fail'
         }
         if_exists = if_exists_map[mode.upper()]
