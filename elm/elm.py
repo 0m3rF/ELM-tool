@@ -15,7 +15,7 @@ def cli():
 
 cli.add_command(environment.environment)
 cli.add_command(copy.copy)
-# cli.add_command(mask.mask)
+cli.add_command(mask.mask)
 
 if __name__ == '__main__':
     venv.create_and_activate_venv(variables.VENV_DIR)
