@@ -1,46 +1,10 @@
 import click
 import os
 import json
-import random
-import string
 import pandas as pd
 from elm_utils import variables
+from elm_utils.mask_algorithms import MASKING_ALGORITHMS
 
-# Masking algorithms
-def star_mask(value, **kwargs):
-    """Replace all characters with stars (*) except the first and last character"""
-    if value is None or pd.isna(value) or not isinstance(value, str):
-        return value
-    if len(value) <= 2:
-        return value
-    return value[0] + '*' * (len(value) - 2) + value[-1]
-
-def star_mask_with_length(value, length=4, **kwargs):
-    """Keep the first 'length' characters and replace the rest with stars (*)"""
-    if value is None or pd.isna(value) or not isinstance(value, str):
-        return value
-    if len(value) <= length:
-        return value
-    return value[:length] + '*' * (len(value) - length)
-
-def random_replace(value, **kwargs):
-    """Replace with random characters of the same length"""
-    if value is None or pd.isna(value) or not isinstance(value, str):
-        return value
-    chars = string.ascii_letters + string.digits
-    return ''.join(random.choice(chars) for _ in range(len(value)))
-
-def nullify(value, **kwargs):
-    """Replace with None"""
-    return None
-
-# Available masking algorithms
-MASKING_ALGORITHMS = {
-    'star': star_mask,
-    'star_length': star_mask_with_length,
-    'random': random_replace,
-    'nullify': nullify
-}
 
 def load_masking_definitions():
     """Load masking definitions from the masking file"""
