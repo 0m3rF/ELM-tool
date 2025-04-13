@@ -3,6 +3,9 @@ import os
 import sys
 import subprocess
 import configparser
+import pandas as pd
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 from elm_utils import variables, encryption
 
 config = configparser.ConfigParser()
@@ -38,6 +41,60 @@ def ensure_db_driver_installed(db_type):
         except subprocess.CalledProcessError as e:
             print(f"Failed to install {package_name}: {str(e)}")
             print(f"Please install {package_name} manually using: pip install {package_name}")
+
+def get_connection_url(env_name, encryption_key=None):
+    """Get a SQLAlchemy connection URL for the specified environment"""
+    config.read(variables.ENVS_FILE)
+
+    # Check if the environment exists
+    if not env_name in config.sections():
+        raise click.UsageError(f"Environment '{env_name}' not found")
+
+    # Check if the environment is encrypted
+    is_encrypted = config[env_name].get("is_encrypted", 'False') == 'True'
+
+    # Get environment details
+    if is_encrypted:
+        if not encryption_key:
+            raise click.UsageError(f"Environment '{env_name}' is encrypted. Provide an encryption key.")
+
+        try:
+            # Decrypt the environment
+            decrypted_env = encryption.decrypt_environment(dict(config[env_name]), encryption_key)
+
+            # Get decrypted details
+            env_type = decrypted_env["type"].upper()
+            host = decrypted_env["host"]
+            port = decrypted_env["port"]
+            user = decrypted_env["user"]
+            password = decrypted_env["password"]
+            service = decrypted_env["service"]
+        except Exception as e:
+            raise click.UsageError(f"Failed to decrypt environment: {str(e)}. Check your encryption key.")
+    else:
+        # Get unencrypted details
+        env_type = config[env_name]["type"].upper()
+        host = config[env_name]["host"]
+        port = config[env_name]["port"]
+        user = config[env_name]["user"]
+        password = config[env_name]["password"]
+        service = config[env_name]["service"]
+
+    # Create connection URL based on database type
+    if env_type == "ORACLE":
+        # Oracle connection string format
+        return f"oracle+cx_oracle://{user}:{password}@{host}:{port}/{service}"
+    elif env_type == "POSTGRES":
+        # PostgreSQL connection string format
+        return f"postgresql://{user}:{password}@{host}:{port}/{service}"
+    elif env_type == "MYSQL":
+        # MySQL connection string format
+        return f"mysql+pymysql://{user}:{password}@{host}:{port}/{service}"
+    elif env_type == "MSSQL":
+        # MSSQL connection string format
+        return f"mssql+pyodbc://{user}:{password}@{host}:{port}/{service}?driver=ODBC+Driver+17+for+SQL+Server"
+    else:
+        raise click.UsageError(f"Unsupported database type: {env_type}")
 
 class AliasedGroup(click.Group):
     def get_command(self, ctx, cmd_name):
@@ -506,6 +563,46 @@ def test(name, encryption_key=None):
 
     return True
 
+@environment.command()
+@click.argument('name')
+@click.option("-q", "--query", required=True, help="SQL query to execute")
+@click.option("-k", "--encryption-key", required=False, help="Encryption key for encrypted environments")
+def execute(name, query, encryption_key):
+    """Execute a SQL query on a database
+
+    Examples:
+
+        Execute a simple query:
+          elm environment execute dev-pg --query "SELECT * FROM users LIMIT 10"
+
+        Execute a query on an encrypted environment:
+          elm environment execute secure-mysql --query "SHOW TABLES" --encryption-key mypassword
+
+        Using the exec alias:
+          elm environment exec dev-pg --query "SELECT COUNT(*) FROM orders"
+    """
+    try:
+        # Get connection URL
+        connection_url = get_connection_url(name, encryption_key)
+
+        # Execute the query
+        engine = create_engine(connection_url)
+        with engine.connect() as connection:
+            result = connection.execute(text(query))
+            if result.returns_rows:
+                # Convert result to DataFrame for display
+                df = pd.DataFrame(result.fetchall())
+                if not df.empty:
+                    df.columns = result.keys()
+                    click.echo(df.to_string(index=False))
+                else:
+                    click.echo("Query executed successfully. No rows returned.")
+            else:
+                click.echo("Query executed successfully. No result set.")
+
+    except Exception as e:
+        click.echo(f"Error: {str(e)}")
+
 ALIASES = {
     "new": create,
     "ls": list,
@@ -513,5 +610,7 @@ ALIASES = {
     "remove": delete,
     "inspect": show,
     "edit": update,
-    "validate": test
+    "validate": test,
+    "exec": execute,
+    "run": execute
 }

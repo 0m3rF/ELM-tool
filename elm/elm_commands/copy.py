@@ -4,7 +4,7 @@ import configparser
 import concurrent.futures
 import json
 import pandas as pd
-from sqlalchemy import create_engine, text, inspect
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.exc import SQLAlchemyError
 from elm_utils import variables, encryption
 
@@ -477,39 +477,9 @@ def db2db(source, target, query, table, mode, batch_size, parallel, source_key, 
     except Exception as e:
         click.echo(f"Error: {str(e)}")
 
-@copy.command()
-@click.argument('name')
-@click.option("-q", "--query", required=True, help="SQL query to execute")
-@click.option("-k", "--encryption-key", required=False, help="Encryption key for encrypted environments")
-def execute(name, query, encryption_key):
-    """Execute a SQL query on a database"""
-    try:
-        # Get connection URL
-        connection_url = get_connection_url(name, encryption_key)
-
-        # Execute the query
-        engine = create_engine(connection_url)
-        with engine.connect() as connection:
-            result = connection.execute(text(query))
-            if result.returns_rows:
-                # Convert result to DataFrame for display
-                df = pd.DataFrame(result.fetchall())
-                if not df.empty:
-                    df.columns = result.keys()
-                    click.echo(df.to_string(index=False))
-                else:
-                    click.echo("Query executed successfully. No rows returned.")
-            else:
-                click.echo("Query executed successfully. No result set.")
-
-    except Exception as e:
-        click.echo(f"Error: {str(e)}")
-
 # Define command aliases
 ALIASES = {
     "d2f": db2file,
     "f2d": file2db,
-    "d2d": db2db,
-    "exec": execute,
-    "run": execute
+    "d2d": db2db
 }
