@@ -1,6 +1,6 @@
 import click, os
-from elm_commands import environment, mask, copy, generate
-from elm_utils import venv, variables
+from elm.elm_commands import environment, mask, copy, generate
+from elm.elm_utils import venv, variables
 
 def ensure_env_dir():
     """Ensure the environment directory exists."""

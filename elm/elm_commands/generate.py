@@ -1,8 +1,8 @@
 import click
 import os
 import pandas as pd
-from elm_utils.random_data import generate_random_data
-from elm_utils.db_utils import get_connection_url, check_table_exists, get_table_columns, write_to_db, write_to_file
+from elm.elm_utils.random_data import generate_random_data
+from elm.elm_utils.db_utils import get_connection_url, check_table_exists, get_table_columns, write_to_db, write_to_file
 
 class AliasedGroup(click.Group):
     def get_command(self, ctx, cmd_name):
@@ -41,22 +41,22 @@ def data(num_records, columns, environment, table, output, format, string_length
     Examples:
 
         Generate 10 random records for specified columns:
-          elm generate data --columns "id,name,email,created_at" --num-records 10
+          elm-tool generate data --columns "id,name,email,created_at" --num-records 10
 
         Generate data based on table schema:
-          elm generate data --environment dev --table users --num-records 100
+          elm-tool generate data --environment dev --table users --num-records 100
 
         Generate data with specific patterns:
-          elm generate data --columns "id,name,email" --pattern "email" --num-records 5
+          elm-tool generate data --columns "id,name,email" --pattern "email" --num-records 5
 
         Generate data and save to file:
-          elm generate data --columns "id,name,email" --output "test_data.csv" --num-records 20
+          elm-tool generate data --columns "id,name,email" --output "test_data.csv" --num-records 20
 
         Generate data with specific ranges:
-          elm generate data --columns "id,price,created_at" --min-number 100 --max-number 999 --start-date "2023-01-01" --end-date "2023-12-31"
+          elm-tool generate data --columns "id,price,created_at" --min-number 100 --max-number 999 --start-date "2023-01-01" --end-date "2023-12-31"
 
         Generate data and write to database:
-          elm generate data --environment dev --table users --num-records 50 --write-to-db
+          elm-tool generate data --environment dev --table users --num-records 50 --write-to-db
     """
     try:
         # Parse columns if provided

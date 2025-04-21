@@ -6,7 +6,7 @@ import configparser
 import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
-from elm_utils import variables, encryption
+from elm.elm_utils import variables, encryption
 
 config = configparser.ConfigParser()
 
@@ -115,10 +115,10 @@ def environment():
     Examples:
 
         List all available commands:
-          elm environment --help
+          elm-tool environment --help
 
         List all environments:
-          elm environment list
+          elm-tool environment list
     """
     pass
 
@@ -140,16 +140,16 @@ def create(name, host, port, user, password, service, type, overwrite, encrypt, 
     Examples:
 
         Create a PostgreSQL environment:
-          elm environment create dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres
+          elm-tool environment create dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres
 
         Create an Oracle environment:
-          elm environment create prod-ora --host oraserver --port 1521 --user system --password oracle --service XE --type oracle
+          elm-tool environment create prod-ora --host oraserver --port 1521 --user system --password oracle --service XE --type oracle
 
         Create an encrypted MySQL environment:
-          elm environment create secure-mysql --host dbserver --port 3306 --user root --password secret --service mysql --type mysql --encrypt --encryption-key mypassword
+          elm-tool environment create secure-mysql --host dbserver --port 3306 --user root --password secret --service mysql --type mysql --encrypt --encryption-key mypassword
 
         Create an environment and overwrite if it already exists:
-          elm environment create dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres --overwrite
+          elm-tool environment create dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres --overwrite
     """
 
     if name == "*":
@@ -213,16 +213,16 @@ def list(all, host, port, user, password, service, type):
     Examples:
 
         List all environments:
-          elm environment list
+          elm-tool environment list
 
         Show all details of all environments:
-          elm environment list --all
+          elm-tool environment list --all
 
         Show only host and port information:
-          elm environment list --host --port
+          elm-tool environment list --host --port
 
         Show specific information (user and service):
-          elm environment list --user --service
+          elm-tool environment list --user --service
     """
     config.read(variables.ENVS_FILE)
 
@@ -259,10 +259,10 @@ def delete(name):
     Examples:
 
         Delete an environment:
-          elm environment delete dev-pg
+          elm-tool environment delete dev-pg
 
         Using the alias:
-          elm environment rm old-env
+          elm-tool environment rm old-env
     """
     config.read(variables.ENVS_FILE)
 
@@ -284,13 +284,13 @@ def show(name, encryption_key):
 
     Examples:
         Show an environment:
-          elm environment show dev-pg
+          elm-tool environment show dev-pg
 
         Show an encrypted environment:
-          elm environment show secure-env --encryption-key mypassword
+          elm-tool environment show secure-env --encryption-key mypassword
 
         Using the inspect alias:
-          elm environment inspect dev-pg
+          elm-tool environment inspect dev-pg
     """
     config.read(variables.ENVS_FILE)
 
@@ -345,19 +345,19 @@ def update(name, host, port, user, password, service, type, encrypt, encryption_
     Examples:
 
         Update the host and port of an environment:
-          elm environment update dev-pg --host new-host --port 5433
+          elm-tool environment update dev-pg --host new-host --port 5433
 
         Update the password:
-          elm environment update prod-ora --password new-password
+          elm-tool environment update prod-ora --password new-password
 
         Encrypt an existing environment:
-          elm environment update dev-mysql --encrypt --encryption-key mypassword
+          elm-tool environment update dev-mysql --encrypt --encryption-key mypassword
 
         Update multiple fields at once:
-          elm environment update dev-pg --host new-host --port 5433 --user new-user
+          elm-tool environment update dev-pg --host new-host --port 5433 --user new-user
 
         Using the edit alias:
-          elm environment edit dev-pg --host new-host
+          elm-tool environment edit dev-pg --host new-host
     """
     # Check if encryption key is provided when encrypt flag is set
     if encrypt and not encryption_key:
@@ -476,13 +476,13 @@ def test(name, encryption_key=None):
     Examples:
 
         Test a database connection:
-          elm environment test dev-pg
+          elm-tool environment test dev-pg
 
         Test an encrypted environment connection:
-          elm environment test secure-mysql --encryption-key mypassword
+          elm-tool environment test secure-mysql --encryption-key mypassword
 
         Using the validate alias:
-          elm environment validate dev-pg
+          elm-tool environment validate dev-pg
     """
     # Use the name directly as it's now a required argument
     env_name = name
@@ -573,13 +573,13 @@ def execute(name, query, encryption_key):
     Examples:
 
         Execute a simple query:
-          elm environment execute dev-pg --query "SELECT * FROM users LIMIT 10"
+          elm-tool environment execute dev-pg --query "SELECT * FROM users LIMIT 10"
 
         Execute a query on an encrypted environment:
-          elm environment execute secure-mysql --query "SHOW TABLES" --encryption-key mypassword
+          elm-tool environment execute secure-mysql --query "SHOW TABLES" --encryption-key mypassword
 
         Using the exec alias:
-          elm environment exec dev-pg --query "SELECT COUNT(*) FROM orders"
+          elm-tool environment exec dev-pg --query "SELECT COUNT(*) FROM orders"
     """
     try:
         # Get connection URL

@@ -3,7 +3,7 @@ import configparser
 import pandas as pd
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
-from elm_utils import variables, encryption
+from elm.elm_utils import variables, encryption
 
 # Read the environment configuration
 config = configparser.ConfigParser()
@@ -95,27 +95,27 @@ def execute_query(connection_url, query, batch_size=None, environment=None, appl
             if batch_size:
                 # Execute with batching
                 result = pd.read_sql_query(query, connection, chunksize=batch_size)
-                
+
                 # For batched results, we'll apply masking when each batch is processed
                 if not apply_mask:
                     return result  # This will be an iterator of DataFrames
-                
+
                 # Create a generator that applies masking to each batch
                 def masked_batches():
                     for batch in result:
-                        from elm_utils.data_utils import apply_masking
+                        from elm.elm_utils.data_utils import apply_masking
                         yield apply_masking(batch, environment)
-                
+
                 return masked_batches()
             else:
                 # Execute without batching
                 result = pd.read_sql_query(query, connection)
-                
+
                 # Apply masking if requested
                 if apply_mask:
-                    from elm_utils.data_utils import apply_masking
+                    from elm.elm_utils.data_utils import apply_masking
                     result = apply_masking(result, environment)
-                
+
                 return result
     except SQLAlchemyError as e:
         raise ValueError(f"Database error: {str(e)}")
@@ -126,7 +126,7 @@ def write_to_db(data, connection_url, table_name, if_exists='append', batch_size
     """Write data to a database table"""
     try:
         engine = create_engine(connection_url)
-        
+
         if batch_size and len(data) > batch_size:
             # Write in batches
             for i in range(0, len(data), batch_size):
@@ -136,7 +136,7 @@ def write_to_db(data, connection_url, table_name, if_exists='append', batch_size
         else:
             # Write all at once
             data.to_sql(table_name, engine, if_exists=if_exists, index=False)
-            
+
         return True
     except Exception as e:
         raise ValueError(f"Error writing to database: {str(e)}")
@@ -146,7 +146,7 @@ def write_to_file(data, file_path, format='csv', mode='w'):
     try:
         # Create directory if it doesn't exist
         os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
-        
+
         # Write based on format
         if format.lower() == 'csv':
             # For CSV, handle append mode specially
@@ -174,7 +174,7 @@ def write_to_file(data, file_path, format='csv', mode='w'):
                 data.to_json(file_path, orient='records', indent=2)
         else:
             raise ValueError(f"Unsupported file format: {format}")
-            
+
         return True
     except Exception as e:
         raise ValueError(f"Error writing to file: {str(e)}")

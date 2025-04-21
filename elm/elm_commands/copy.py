@@ -4,9 +4,9 @@ import configparser
 import concurrent.futures
 import json
 import pandas as pd
-from elm_utils import variables
-from elm_utils.data_utils import apply_masking
-from elm_utils.db_utils import get_connection_url, check_table_exists, get_table_columns, execute_query, write_to_db, write_to_file
+from elm.elm_utils import variables
+from elm.elm_utils.data_utils import apply_masking
+from elm.elm_utils.db_utils import get_connection_url, check_table_exists, get_table_columns, execute_query, write_to_db, write_to_file
 
 # Read the environment configuration
 config = configparser.ConfigParser()
@@ -25,7 +25,7 @@ def copy():
     pass
 
 # Import modules for backward compatibility
-from elm_utils import encryption
+from elm.elm_utils import encryption
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.exc import SQLAlchemyError
 
