@@ -2,8 +2,8 @@ import click
 import os
 import json
 import pandas as pd
-from elm_utils import variables
-from elm_utils.mask_algorithms import MASKING_ALGORITHMS
+from elm.elm_utils import variables
+from elm.elm_utils.mask_algorithms import MASKING_ALGORITHMS
 
 
 def load_masking_definitions():
@@ -98,13 +98,13 @@ def add(column, algorithm, environment, length):
     Examples:
 
         Add global masking for a column:
-          elm mask add --column password --algorithm star
+          elm-tool mask add --column password --algorithm star
 
         Add environment-specific masking:
-          elm mask add --column credit_card --algorithm star_length --environment prod --length 6
+          elm-tool mask add --column credit_card --algorithm star_length --environment prod --length 6
 
         Nullify a column in development:
-          elm mask add --column ssn --algorithm nullify --environment dev
+          elm-tool mask add --column ssn --algorithm nullify --environment dev
     """
     # Load existing definitions
     definitions = load_masking_definitions()
@@ -148,10 +148,10 @@ def remove(column, environment):
     Examples:
 
         Remove global masking for a column:
-          elm mask remove --column password
+          elm-tool mask remove --column password
 
         Remove environment-specific masking:
-          elm mask remove --column credit_card --environment prod
+          elm-tool mask remove --column credit_card --environment prod
     """
     # Load existing definitions
     definitions = load_masking_definitions()
@@ -186,10 +186,10 @@ def list(environment):
     Examples:
 
         List all masking definitions:
-          elm mask list
+          elm-tool mask list
 
         List environment-specific masking:
-          elm mask list --environment prod
+          elm-tool mask list --environment prod
     """
     # Load existing definitions
     definitions = load_masking_definitions()
@@ -247,10 +247,10 @@ def test(column, value, environment):
     Examples:
 
         Test global masking for a column:
-          elm mask test --column password --value "secret123"
+          elm-tool mask test --column password --value "secret123"
 
         Test environment-specific masking:
-          elm mask test --column credit_card --value "4111111111111111" --environment prod
+          elm-tool mask test --column credit_card --value "4111111111111111" --environment prod
     """
     # Load existing definitions
     definitions = load_masking_definitions()
