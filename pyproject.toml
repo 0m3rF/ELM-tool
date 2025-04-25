@@ -1,8 +1,25 @@
 [project]
-name = "elm"
-version = "0.0.1"
+name = "elm-tool"
+version = "0.0.2"
 description = "Extract, Load and Mask Tool for Database Operations"
 authors = [{name = "Ömer Faruk Kırlı", email = "omerfarukkirli@gmail.com"}]
+readme = "README.md"
+requires-python = ">=3.7"
+license = "GPL-3.0-or-later"
+keywords = [
+    "database tool",
+    "data masking",
+    "data extraction",
+    "data loading",
+    "etl tool",
+    "data migration",
+    "data anonymization",
+    "database utilities",
+    "test-data-generation",
+    "database operations",
+    "database environment management",
+    "cross database tool"
+]
 dependencies = [
     "click>=8.0.0",
     "cryptography>=3.4.7",
@@ -13,7 +30,6 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
-# Optional database-specific dependencies
 [project.optional-dependencies]
 postgres = ["psycopg2-binary>=2.9.1"]
 oracle = ["cx_oracle>=8.3.0"]
@@ -22,8 +38,17 @@ mssql = ["pyodbc>=4.0.34"]
 all-db = ["psycopg2-binary>=2.9.1", "cx_oracle>=8.3.0", "pymysql>=1.0.2", "pyodbc>=4.0.34"]
 
 [project.scripts]
-elm = "elm.cli:main"
+elm-tool = "elm.elm:cli"
+
+[project.urls]
+Homepage = "https://github.com/0m3rF/ELM-tool"
+Documentation = "https://github.com/0m3rF/ELM-tool"
+Repository = "https://github.com/0m3rF/ELM-tool.git"
+Issues = "https://github.com/0m3rF/ELM-tool/issues"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build]
+packages = ["elm"]
