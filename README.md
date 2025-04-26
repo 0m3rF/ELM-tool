@@ -10,10 +10,16 @@ Extract, Load and Mask Tool for Database Operations
 - [Features](#features)
 - [Installation](#installation)
 - [Usage](#usage)
-  - [Environment Management](#environment-management)
-  - [Data Copy Operations](#data-copy-operations)
-  - [Data Masking](#data-masking)
-  - [Test Data Generation](#test-data-generation)
+  - [Command Line Interface](#command-line-interface)
+    - [Environment Management](#environment-management)
+    - [Data Copy Operations](#data-copy-operations)
+    - [Data Masking](#data-masking)
+    - [Test Data Generation](#test-data-generation)
+  - [Python API](#python-api)
+    - [Environment Management API](#environment-management-api)
+    - [Data Copy API](#data-copy-api)
+    - [Data Masking API](#data-masking-api)
+    - [Data Generation API](#data-generation-api)
 - [Configuration](#configuration)
 - [Contributing](#contributing)
 - [License](#license)
@@ -56,6 +62,10 @@ pip install -e .
 ```
 
 ## Usage
+
+ELM Tool can be used both as a command-line tool and as a Python library.
+
+### Command Line Interface
 
 ELM Tool provides a command-line interface with several command groups:
 
@@ -162,11 +172,192 @@ elm-tool generate data --columns "id,name,email" --output "test_data.csv" --num-
 elm-tool generate data --environment dev-pg --table users --num-records 100 --write-to-db
 ```
 
+### Python API
+
+ELM Tool can also be used as a Python library, allowing you to integrate its functionality directly into your Python applications.
+
+```python
+import elm
+
+# Create a database environment
+elm.create_environment(
+    name="dev-pg",
+    host="localhost",
+    port=5432,
+    user="postgres",
+    password="password",
+    service="postgres",
+    db_type="postgres"
+)
+
+# Test the connection
+result = elm.test_environment("dev-pg")
+print(f"Connection successful: {result['success']}")
+
+# Execute a query
+data = elm.execute_sql("dev-pg", "SELECT * FROM users LIMIT 10")
+print(data)
+```
+
+#### Environment Management API
+
+```python
+# Create a new environment
+elm.create_environment(
+    name="dev-pg",
+    host="localhost",
+    port=5432,
+    user="postgres",
+    password="password",
+    service="postgres",
+    db_type="postgres"
+)
+
+# Create an encrypted environment
+elm.create_environment(
+    name="secure-mysql",
+    host="dbserver",
+    port=3306,
+    user="root",
+    password="secret",
+    service="mysql",
+    db_type="mysql",
+    encrypt=True,
+    encryption_key="mypassword"
+)
+
+# List all environments
+environments = elm.list_environments()
+for env in environments:
+    print(env['name'])
+
+# Get details of a specific environment
+env_details = elm.get_environment("dev-pg")
+print(env_details)
+
+# Test a connection
+result = elm.test_environment("dev-pg")
+if result['success']:
+    print("Connection successful!")
+else:
+    print(f"Connection failed: {result['message']}")
+
+# Execute a query
+data = elm.execute_sql("dev-pg", "SELECT * FROM users LIMIT 10")
+print(data)
+
+# Delete an environment
+elm.delete_environment("dev-pg")
+```
+
+#### Data Copy API
+
+```python
+# Copy data from database to file
+result = elm.copy_db_to_file(
+    source_env="dev-pg",
+    query="SELECT * FROM users",
+    file_path="users.csv",
+    file_format="csv"
+)
+print(f"Exported {result['record_count']} records")
+
+# Copy data from file to database
+result = elm.copy_file_to_db(
+    file_path="users.csv",
+    target_env="prod-pg",
+    table="users",
+    file_format="csv",
+    mode="APPEND"
+)
+print(f"Imported {result['record_count']} records")
+
+# Copy data between databases
+result = elm.copy_db_to_db(
+    source_env="dev-pg",
+    target_env="prod-pg",
+    query="SELECT * FROM users",
+    table="users",
+    mode="APPEND",
+    batch_size=1000
+)
+print(f"Copied {result['record_count']} records")
+```
+
+#### Data Masking API
+
+```python
+# Add a masking rule
+elm.add_mask(column="password", algorithm="star")
+
+# Add environment-specific masking
+elm.add_mask(
+    column="credit_card",
+    algorithm="star_length",
+    environment="prod",
+    length=6
+)
+
+# List all masking rules
+masks = elm.list_masks()
+print(masks)
+
+# Test a masking rule
+result = elm.test_mask(
+    column="credit_card",
+    value="1234-5678-9012-3456",
+    environment="prod"
+)
+print(f"Original: {result['original']}")
+print(f"Masked: {result['masked']}")
+
+# Remove a masking rule
+elm.remove_mask(column="password")
+```
+
+#### Data Generation API
+
+```python
+# Generate random data
+data = elm.generate_data(
+    num_records=100,
+    columns=["id", "name", "email", "created_at"]
+)
+print(data)
+
+# Generate data with specific patterns
+data = elm.generate_data(
+    num_records=50,
+    columns=["id", "name", "email"],
+    pattern={"email": "[a-z]{5}@example.com"}
+)
+print(data)
+
+# Generate data and save to file
+result = elm.generate_and_save(
+    num_records=200,
+    columns=["id", "name", "email"],
+    output="test_data.csv",
+    format="csv"
+)
+print(f"Generated {result['record_count']} records")
+
+# Generate data and write to database
+result = elm.generate_and_save(
+    num_records=100,
+    environment="dev-pg",
+    table="users",
+    write_to_db=True,
+    mode="APPEND"
+)
+print(f"Generated and wrote {result['record_count']} records to database")
+```
+
 ## Configuration
 
 ELM Tool stores environment configurations in `~/.elm/environments.ini` by default. Masking rules are stored in `~/.elm/masking.json`.
 
-You can encrypt sensitive environment information using the `--encrypt` flag when creating or updating environments.
+You can encrypt sensitive environment information using the `--encrypt` flag when creating or updating environments, or by setting `encrypt=True` when using the API.
 
 ## Contributing
 
