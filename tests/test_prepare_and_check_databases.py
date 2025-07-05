@@ -624,7 +624,48 @@ class TestDatabaseConnections:
         assert config.env_vars["MSSQL_PID"] == "Express"
         assert config.port == 1433
 
+class TestDatabaseData:
+    """Test database data integrity - runs after connections are verified."""
+    
+    def test_postgresql_data_integrity(self, docker_manager):
+        """Test PostgreSQL data integrity."""
 
+        query = "select count(1) from categories"
+        cmd = ["docker", "exec", "ELM_TOOL_postgresql", "psql", "-qtA", "-U", "ELM_TOOL_user", "-d", "ELM_TOOL_db", "-c", query]
+        success, stdout, stderr = docker_manager.run_command(cmd, timeout=15)
+
+        if not success:
+            assert False
+        elif int(stdout.strip()) > 0:
+            # checks if the categories table exists and has data
+            assert True
+        else:
+            # Download northwind.sql
+            curl_cmd = ["curl", "-O", "https://raw.githubusercontent.com/pthom/northwind_psql/master/northwind.sql"]
+            curl_success, _, stderr = docker_manager.run_command(curl_cmd, timeout=30)
+
+            if curl_success:
+                # Copy the file into the container and then execute it
+                copy_cmd = ["docker", "cp", "northwind.sql", "ELM_TOOL_postgresql:/tmp/northwind.sql"]
+                copy_success, _, stderr = docker_manager.run_command(copy_cmd, timeout=15)
+
+                if copy_success:
+                    exec_cmd = ["docker", "exec", "ELM_TOOL_postgresql", "psql", "-U", "ELM_TOOL_user", "-d", "ELM_TOOL_db", "-f", "/tmp/northwind.sql"]
+                    exec_success, _, stderr = docker_manager.run_command(exec_cmd, timeout=60)
+
+                    if exec_success:
+                        # Retry the original query
+                        success, _, stderr = docker_manager.run_command(cmd, timeout=15)
+                        if success:
+                            assert True
+                            return
+                    else:
+                        pytest.fail(f"Failed to execute northwind.sql: {stderr}")
+                else:
+                    pytest.fail(f"Failed to copy northwind.sql to container: {stderr}")
+            else:
+                pytest.fail(f"Failed to download northwind.sql: {stderr}")
+            
 # Utility functions
 def debug_mssql_connection():
     """Debug MSSQL connection issues."""
