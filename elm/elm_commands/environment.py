@@ -102,6 +102,9 @@ class AliasedGroup(click.Group):
             cmd_name = ALIASES[cmd_name].name
         except KeyError:
             pass
+        # cmd_name should be a string at this point, but add safety check
+        if cmd_name is None:
+                return None
         return super().get_command(ctx, cmd_name)
 
 @click.group(cls=AliasedGroup)
