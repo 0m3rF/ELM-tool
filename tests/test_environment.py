@@ -5,23 +5,19 @@ import configparser
 import pytest
 import pandas as pd
 import elm
-from .test_databases import DatabaseConfigs
+from .test_prepare_and_check_databases import DatabaseConfigs
 from elm.elm_utils import variables
-
-@pytest.fixture
-def temp_env_dir():
-    return variables.ENVS_FILE
-    
+from .tst_variables import *    
 
 @pytest.mark.dependency(name="create_environment")
-def test_create_environment(temp_env_dir):
+def test_create_pg_environment(temp_env_dir):
     """Test creating a new environment."""
     # Create a test environment
     db_configs = DatabaseConfigs()
     db_config = db_configs.get_configs()["postgresql"]
 
-    result = elm.create_environment(
-        name="test-pg",
+    source_env_result = elm.create_environment(
+        name=TEST_PG_ENV_NAME,
         host="localhost",
         port=db_config.port,
         user=db_config.env_vars["POSTGRES_USER"],
@@ -30,33 +26,58 @@ def test_create_environment(temp_env_dir):
         db_type="postgres"
     )
 
-    print("result is " + str(result))
-
-    if(not result):
+    if(not source_env_result):
         config = configparser.ConfigParser()
         config.read(temp_env_dir)
-        if "test-pg" in config.sections():
+        if TEST_PG_ENV_NAME in config.sections():
             # If the environment exists, success the test
             assert True
         else:
             pytest.fail("Failed to create environment and it does not exists")
         return
 
-    assert result is True
+    assert source_env_result is True
 
     # Verify the environment was created
     config = configparser.ConfigParser()
     config.read(temp_env_dir)
 
-    assert "test-pg" in config.sections()
-    assert config["test-pg"]["host"] == "localhost"
-    assert config["test-pg"]["port"] == str(db_config.port)
-    assert config["test-pg"]["user"] == db_config.env_vars["POSTGRES_USER"]
-    assert config["test-pg"]["password"] == db_config.env_vars["POSTGRES_PASSWORD"]
-    assert config["test-pg"]["service"] == db_config.env_vars["POSTGRES_DB"]
-    assert config["test-pg"]["type"] == "postgres"
-    assert config["test-pg"]["is_encrypted"] == "False"
+    assert TEST_PG_ENV_NAME in config.sections()
+    assert config[TEST_PG_ENV_NAME]["host"] == "localhost"
+    assert config[TEST_PG_ENV_NAME]["port"] == str(db_config.port)
+    assert config[TEST_PG_ENV_NAME]["user"] == db_config.env_vars["POSTGRES_USER"]
+    assert config[TEST_PG_ENV_NAME]["password"] == db_config.env_vars["POSTGRES_PASSWORD"]
+    assert config[TEST_PG_ENV_NAME]["service"] == db_config.env_vars["POSTGRES_DB"]
+    assert config[TEST_PG_ENV_NAME]["type"] == "postgres"
+    assert config[TEST_PG_ENV_NAME]["is_encrypted"] == "False"
 
+def test_create_mysql_environment(temp_env_dir):
+    """Test creating a new environment."""
+    # Create a test environment
+    db_configs = DatabaseConfigs()
+    db_config = db_configs.get_configs()["mysql"]
+
+    source_env_result = elm.create_environment(
+        name=TEST_MYSQL_ENV_NAME,
+        host="localhost",
+        port=db_config.port,
+        user=db_config.env_vars["MYSQL_USER"],
+        password=db_config.env_vars["MYSQL_PASSWORD"],
+        service=db_config.env_vars["MYSQL_DATABASE"],
+        db_type="mysql"
+    )
+
+    if(not source_env_result):
+        config = configparser.ConfigParser()
+        config.read(temp_env_dir)
+        if TEST_MYSQL_ENV_NAME in config.sections():
+            # If the environment exists, success the test
+            assert True
+        else:
+            pytest.fail("Failed to create environment and it does not exists")
+        return
+
+    assert source_env_result is True
 @pytest.mark.dependency(name="create_encrypted_environment")
 def test_create_encrypted_environment(temp_env_dir):
     """Test creating an encrypted environment."""
@@ -109,7 +130,7 @@ def test_list_environments(temp_env_dir):
     # Verify the environments are listed
     assert len(environments) == 2
     env_names = [env["name"] for env in environments]
-    assert "test-pg" in env_names
+    assert TEST_PG_ENV_NAME in env_names
     assert "secure-pg" in env_names
 
     # Test with show_all=True
@@ -129,7 +150,7 @@ def test_get_environment(temp_env_dir):
     db_config = db_configs.get_configs()["postgresql"]
 
     # Get environment details
-    env = elm.get_environment("test-pg")
+    env = elm.get_environment(TEST_PG_ENV_NAME)
     # Verify the environment details
     assert env is not None
     assert env["host"] == "localhost"
@@ -172,7 +193,7 @@ def test_test_environment(temp_env_dir):
     """Test testing a database connection."""
 
     # Test the connection
-    result = elm.test_environment("test-pg")
+    result = elm.test_environment(TEST_PG_ENV_NAME)
 
     # Verify the connection was tested
     assert result["success"] is True
@@ -184,7 +205,7 @@ def test_execute_sql(temp_env_dir):
 
 
     # Execute SQL
-    result = elm.execute_sql("test-pg", "SELECT 1 AS id, 'Test' AS name UNION ALL SELECT 2, 'Test 2' UNION ALL SELECT 3, 'Test 3'")
+    result = elm.execute_sql(TEST_PG_ENV_NAME, "SELECT 1 AS id, 'Test' AS name UNION ALL SELECT 2, 'Test 2' UNION ALL SELECT 3, 'Test 3'")
 
     # Verify the SQL was executed
     assert isinstance(result, pd.DataFrame)
@@ -196,13 +217,13 @@ def test_delete_environment(temp_env_dir):
     """Test deleting an environment."""
 
     # Delete the environment
-    result = elm.delete_environment("test-pg")
+    result = elm.delete_environment(TEST_PG_ENV_NAME)
     assert result is True
 
     # Verify the environment was deleted
     config = configparser.ConfigParser()
     config.read(temp_env_dir)
-    assert "test-pg" not in config.sections()
+    assert TEST_PG_ENV_NAME not in config.sections()
 
 def test_delete_non_existent_environment(temp_env_dir):
     # Test deleting a non-existent environment
