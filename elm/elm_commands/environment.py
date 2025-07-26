@@ -96,6 +96,7 @@ def get_connection_url(env_name, encryption_key=None):
     else:
         raise click.UsageError(f"Unsupported database type: {env_type}")
 
+#Added for alias support at the end of this file.
 class AliasedGroup(click.Group):
     def get_command(self, ctx, cmd_name):
         try:
@@ -108,6 +109,7 @@ class AliasedGroup(click.Group):
         return super().get_command(ctx, cmd_name)
 
 @click.group(cls=AliasedGroup)
+@click.help_option('-h', '--help')
 def environment():
     """Environment management commands.
 
@@ -128,16 +130,18 @@ def environment():
 
 @environment.command()
 @click.argument('name')
-@click.option("-h", "--host", required=True, help="Host of the environment")
-@click.option("-p", "--port", required=True, help="Port of the environment", type=int)
-@click.option("-u", "--user", required=True, help="User of the environment")
-@click.option("-P", "--password", required=True, help="Password of the environment")
-@click.option("-s", "--service", required=True, help="Service of the environment")
-@click.option("-t", "--type", required=True, type=click.Choice(['ORACLE', 'POSTGRES', 'MYSQL', 'MSSQL'], case_sensitive=False),  help="Type of the environment")
+@click.option("-h", "--host", required=False, help="Host of the environment")
+@click.option("-p", "--port", required=False, help="Port of the environment", type=int)
+@click.option("-u", "--user", required=False, help="User of the environment")
+@click.option("-P", "--password", required=False, help="Password of the environment")
+@click.option("-s", "--service", required=False, help="Service of the environment")
+@click.option("-t", "--type", required=False, type=click.Choice(['ORACLE', 'POSTGRES', 'MYSQL', 'MSSQL'], case_sensitive=False),  help="Type of the environment")
 @click.option("-o", "--overwrite", is_flag=True, default= False, help="Overwrite existing environment definition")
 @click.option("-e", "--encrypt", is_flag=True, default= False, help="Encrypt sensitive environment information")
 @click.option("-k", "--encryption-key", required=False, help="The key to use for encryption. Required if --encrypt is used. Unused if no encrypt has given.")
-def create(name, host, port, user, password, service, type, overwrite, encrypt, encryption_key ):
+@click.option("-U", "--user-input", is_flag=True, default=False, help="Get input from user with prompts.")
+@click.help_option('--help')
+def create(name, host, port, user, password, service, type, overwrite, encrypt, encryption_key, user_input):
     """Create a new environment.
 
     Examples:
@@ -153,14 +157,10 @@ def create(name, host, port, user, password, service, type, overwrite, encrypt, 
 
         Create an environment and overwrite if it already exists:
           elm-tool environment create dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres --overwrite
+
+        Create an environment with user input prompts:
+          elm-tool environment create dev-pg --user-input
     """
-
-    if name == "*":
-        raise click.UsageError("Cannot use '*' as environment name.")
-
-    if encrypt and not encryption_key:
-        # Raise an error if --encrypt is True but --encryption-key is missing
-        raise click.UsageError("Option '--encryption-key' / '-k' is required when using '--encrypt' / '-e'.")
 
     # Check if environment file exists
     if( not os.path.isfile(variables.ENVS_FILE)): # create it if not exists
@@ -173,6 +173,45 @@ def create(name, host, port, user, password, service, type, overwrite, encrypt, 
         raise click.UsageError("Name is already exists. To overwrite use '-o' / '--overwrite' existing environment definition.")
     else:
         config[name] = {}
+
+
+    if name == "*":
+        raise click.UsageError("Cannot use '*' as environment name.")
+
+    # Handle user input mode
+    if user_input:
+        # Prompt for all required fields if not provided
+        if not host:
+            host = click.prompt("Host", type=str)
+        if not port:
+            port = click.prompt("Port", type=int)
+        if not user:
+            user = click.prompt("User", type=str)
+        if not password:
+            password = click.prompt("Password", type=str, hide_input=True, confirmation_prompt=True, prompt_suffix=": ")
+        if not service:
+            service = click.prompt("Service", type=str)
+        if not type:
+            type = click.prompt("Type", type=click.Choice(['ORACLE', 'POSTGRES', 'MYSQL', 'MSSQL'], case_sensitive=False))
+        if not encrypt:
+            encrypt = click.confirm("Encrypt environment?", default=False)
+        if encrypt and not encryption_key:
+            encryption_key = click.prompt("Encryption key", type=str, hide_input=True, confirmation_prompt=True, prompt_suffix=": ")
+    else:
+        # Validate required fields when not in user input mode
+        if not all([host, port, user, password, service, type]):
+            missing_fields = []
+            if not host: missing_fields.append("host")
+            if not port: missing_fields.append("port")
+            if not user: missing_fields.append("user")
+            if not password: missing_fields.append("password")
+            if not service: missing_fields.append("service")
+            if not type: missing_fields.append("type")
+            raise click.UsageError(f"Missing required fields: {', '.join(missing_fields)}. Use --user-input flag to be prompted for values.")
+
+    if encrypt and not encryption_key:
+        # Raise an error if --encrypt is True but --encryption-key is missing
+        raise click.UsageError("Option '--encryption-key' / '-k' is required when using '--encrypt' / '-e'.")
 
     # Prepare environment data
     env_data = {
@@ -210,6 +249,7 @@ def create(name, host, port, user, password, service, type, overwrite, encrypt, 
 @click.option("-P", "--password", is_flag=True, default=False, help="Show password of the environment")
 @click.option("-s", "--service", is_flag=True, default=False, help="Show service of the environment")
 @click.option("-t", "--type", is_flag=True, default=False, help="Show type of the environment")
+@click.help_option('--help')
 def list(all, host, port, user, password, service, type):
     """List all environments.
 
@@ -256,6 +296,7 @@ def list(all, host, port, user, password, service, type):
 
 @environment.command()
 @click.argument('name')
+@click.help_option('-h', '--help')
 def delete(name):
     """Remove a system environment.
 
@@ -278,10 +319,10 @@ def delete(name):
         config.write(configfile)
         configfile.close()
 
-
 @environment.command()
 @click.argument('name')
 @click.option("-k", "--encryption-key", required=False, help="The key to decrypt the environment if it's encrypted")
+@click.help_option('-h', '--help')
 def show(name, encryption_key):
     """Show a system environment.
 
@@ -342,6 +383,7 @@ def show(name, encryption_key):
 @click.option("-t", "--type", required=False, type=click.Choice(['ORACLE', 'POSTGRES', 'MYSQL', 'MSSQL'], case_sensitive=False), help="Type of the environment")
 @click.option("-e", "--encrypt", is_flag=True, default=False, help="Encrypt the environment")
 @click.option("-k", "--encryption-key", required=False, help="The key to use for encryption. Required if --encrypt is used.")
+@click.help_option('--help')
 def update(name, host, port, user, password, service, type, encrypt, encryption_key):
     """Update a system environment.
 
@@ -473,6 +515,7 @@ def update(name, host, port, user, password, service, type, encrypt, encryption_
 @environment.command()
 @click.argument('name')
 @click.option("-k", "--encryption-key", required=False, help="The key to decrypt the environment if it's encrypted")
+@click.help_option('-h', '--help')
 def test(name, encryption_key=None):
     """Test a system environment by attempting to connect to the database.
 
@@ -570,6 +613,7 @@ def test(name, encryption_key=None):
 @click.argument('name')
 @click.option("-q", "--query", required=True, help="SQL query to execute")
 @click.option("-k", "--encryption-key", required=False, help="Encryption key for encrypted environments")
+@click.help_option('-h', '--help')
 def execute(name, query, encryption_key):
     """Execute a SQL query on a database
 
@@ -596,7 +640,7 @@ def execute(name, query, encryption_key):
                 # Convert result to DataFrame for display
                 df = pd.DataFrame(result.fetchall())
                 if not df.empty:
-                    df.columns = result.keys()
+                    df.columns = result.keys() # type: ignore
                     click.echo(df.to_string(index=False))
                 else:
                     click.echo("Query executed successfully. No rows returned.")
@@ -611,6 +655,7 @@ ALIASES = {
     "ls": list,
     "rm": delete,
     "remove": delete,
+    "del": delete,
     "inspect": show,
     "edit": update,
     "validate": test,
