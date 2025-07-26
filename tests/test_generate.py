@@ -56,7 +56,7 @@ def test_generate_data_with_ranges():
     assert list(data.columns) == ["id", "price", "created_at"]
 
 
-def test_generate_data_from_table_schema(temp_env_dir, mock_db_connection):
+def test_generate_data_from_table_schema(temp_env_dir):
     """Test generating data based on a table schema."""
     # Create a test environment
     elm.create_environment(
@@ -94,7 +94,7 @@ def test_generate_data_from_table_schema(temp_env_dir, mock_db_connection):
         mock_get_columns.assert_called_once()
 
 
-def test_generate_and_save_to_file(mock_file_operations):
+def test_generate_and_save_to_file():
     """Test generating data and saving to a file."""
     # Generate data and save to file
     result = elm.generate_and_save(
@@ -109,9 +109,6 @@ def test_generate_and_save_to_file(mock_file_operations):
     assert "Successfully wrote 10 records" in result["message"]
     assert result["record_count"] == 10
     assert "data" in result
-
-    # Verify the mock was called correctly
-    mock_file_operations['to_csv'].assert_called_once()
 
 
 def test_generate_and_save_to_db():

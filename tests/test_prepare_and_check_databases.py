@@ -25,7 +25,7 @@ class DatabaseConfig:
     health_check_cmd: List[str]
     wait_time: int = 30
     startup_priority: int = 0  # Lower numbers start first
-    depends_on: List[str] = None  # List of container names this depends on
+    depends_on: List[str] = None  # List of container names this depends on #type: ignore
 
 @dataclass
 class ContainerResult:
@@ -312,7 +312,7 @@ class DatabaseConfigs:
             "postgresql": DatabaseConfig(
                 name="ELM_TOOL_postgresql",
                 image="postgres:15-alpine",
-                port=5432,
+                port=5433,
                 env_vars={
                     "POSTGRES_DB": "ELM_TOOL_db",
                     "POSTGRES_USER": "ELM_TOOL_user",
@@ -325,7 +325,7 @@ class DatabaseConfigs:
             "mysql": DatabaseConfig(
                 name="ELM_TOOL_mysql",
                 image="mysql:8.0",
-                port=3306,
+                port=3307,
                 env_vars={
                     "MYSQL_DATABASE": "ELM_TOOL_db",
                     "MYSQL_USER": "ELM_TOOL_user",
@@ -339,7 +339,7 @@ class DatabaseConfigs:
             "mssql": DatabaseConfig(
                 name="ELM_TOOL_mssql",
                 image="mcr.microsoft.com/mssql/server:2022-latest",
-                port=1433,
+                port=1434,
                 env_vars={
                     "ACCEPT_EULA": "Y",
                     "SA_PASSWORD": "ELM_TOOL_Password123!",
@@ -352,7 +352,7 @@ class DatabaseConfigs:
             "oracle": DatabaseConfig(
                 name="ELM_TOOL_oracle",
                 image="gvenzl/oracle-xe:21-slim",
-                port=1521,
+                port=1522,
                 env_vars={
                     "ORACLE_PASSWORD": "ELM_TOOL_password",
                     "APP_USER": "ELM_TOOL_user",
