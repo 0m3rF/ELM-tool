@@ -4,7 +4,6 @@ import configparser
 import concurrent.futures
 import json
 import pandas as pd
-from elm.elm_utils import variables
 from elm.elm_utils.data_utils import apply_masking
 from elm.elm_utils.db_utils import get_connection_url, check_table_exists, get_table_columns, execute_query, write_to_db, write_to_file
 

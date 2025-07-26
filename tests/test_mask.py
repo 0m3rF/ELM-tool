@@ -8,7 +8,7 @@ import elm
 import pandas as pd
 
 
-def test_add_mask_global(mock_masking_file):
+def test_add_mask_global():
     """Test adding a global masking rule."""
     # The actual implementation might work differently
     # Just test that the function runs without errors
@@ -21,7 +21,7 @@ def test_add_mask_global(mock_masking_file):
     assert isinstance(result, bool)
 
 
-def test_add_mask_environment_specific(mock_masking_file):
+def test_add_mask_environment_specific():
     """Test adding an environment-specific masking rule."""
     # The actual implementation might work differently
     # Just test that the function runs without errors
@@ -36,10 +36,10 @@ def test_add_mask_environment_specific(mock_masking_file):
     assert isinstance(result, bool)
 
 
-def test_remove_mask_global(mock_masking_file):
+def test_remove_mask_global():
     """Test removing a global masking rule."""
     # Set up existing masking definitions
-    mock_masking_file['update']({
+    initial_definitions = {
         'global': {
             'password': {
                 'algorithm': 'star',
@@ -47,28 +47,28 @@ def test_remove_mask_global(mock_masking_file):
             }
         },
         'environments': {}
-    })
+    }
 
-    # Mock the save_masking_definitions function to actually update our mock definitions
-    def mock_save(definitions):
-        mock_masking_file['definitions'] = definitions
-        return True
+    # Mock the load and save functions
+    with patch('elm.api.load_masking_definitions') as mock_load, \
+         patch('elm.api.save_masking_definitions') as mock_save:
 
-    mock_masking_file['save'].side_effect = mock_save
+        mock_load.return_value = initial_definitions
+        mock_save.return_value = True
 
-    # Remove the global masking rule
-    result = elm.remove_mask(
-        column="password"
-    )
+        # Remove the global masking rule
+        result = elm.remove_mask(column="password")
 
-    # Verify the result
-    assert result is True
+        # Verify the result
+        assert result is True
 
-    # Check the definitions directly
-    assert 'password' not in mock_masking_file['definitions']['global']
+        # Verify that save was called with updated definitions
+        mock_save.assert_called_once()
+        saved_definitions = mock_save.call_args[0][0]
+        assert 'password' not in saved_definitions['global']
 
 
-def test_remove_mask_environment_specific(mock_masking_file):
+def test_remove_mask_environment_specific():
     """Test removing an environment-specific masking rule."""
     # The actual implementation might work differently
     # Just test that the function runs without errors
@@ -81,32 +81,33 @@ def test_remove_mask_environment_specific(mock_masking_file):
     assert isinstance(result, bool)
 
 
-def test_remove_nonexistent_mask(mock_masking_file):
+def test_remove_nonexistent_mask():
     """Test removing a non-existent masking rule."""
-    # Set up existing masking definitions
-    mock_masking_file['update']({
+    # Set up existing masking definitions (empty)
+    initial_definitions = {
         'global': {},
         'environments': {}
-    })
+    }
 
-    # Mock the save_masking_definitions function to actually update our mock definitions
-    def mock_save(definitions):
-        mock_masking_file['definitions'] = definitions
-        return True
+    # Mock the load and save functions
+    with patch('elm.api.load_masking_definitions') as mock_load, \
+         patch('elm.api.save_masking_definitions') as mock_save:
 
-    mock_masking_file['save'].side_effect = mock_save
+        mock_load.return_value = initial_definitions
+        mock_save.return_value = True
 
-    # Try to remove a non-existent masking rule
-    result = elm.remove_mask(
-        column="nonexistent"
-    )
+        # Try to remove a non-existent masking rule
+        result = elm.remove_mask(column="nonexistent")
 
-    # The API might return True even if the mask doesn't exist
-    # This is implementation-dependent
-    # assert result is False
+        # The API returns True even if the mask doesn't exist
+        # This is the current implementation behavior
+        assert result is True
+
+        # Verify that save was still called
+        mock_save.assert_called_once()
 
 
-def test_list_masks(mock_masking_file):
+def test_list_masks():
     """Test listing masking rules."""
     # The actual implementation might work differently
     # Just test that the function runs without errors
@@ -118,10 +119,10 @@ def test_list_masks(mock_masking_file):
     assert 'environments' in masks
 
 
-def test_test_mask_global(mock_masking_file):
+def test_test_mask_global():
     """Test testing a global masking rule."""
     # Set up existing masking definitions
-    mock_masking_file['update']({
+    initial_definitions = {
         'global': {
             'password': {
                 'algorithm': 'star',
@@ -129,12 +130,14 @@ def test_test_mask_global(mock_masking_file):
             }
         },
         'environments': {}
-    })
+    }
 
-    # Mock the apply_masking function
-    with patch('elm.api.apply_masking') as mock_apply_masking:
+    # Mock the load function and apply_masking function
+    with patch('elm.api.load_masking_definitions') as mock_load, \
+         patch('elm.api.apply_masking') as mock_apply_masking:
+
+        mock_load.return_value = initial_definitions
         # Create a masked DataFrame for the mock
-        df = pd.DataFrame({'password': ['secret123']})
         masked_df = pd.DataFrame({'password': ['*********']})
         mock_apply_masking.return_value = masked_df
 
@@ -154,10 +157,10 @@ def test_test_mask_global(mock_masking_file):
         mock_apply_masking.assert_called_once()
 
 
-def test_test_mask_environment_specific(mock_masking_file):
+def test_test_mask_environment_specific():
     """Test testing an environment-specific masking rule."""
     # Set up existing masking definitions
-    mock_masking_file['update']({
+    initial_definitions = {
         'global': {},
         'environments': {
             'prod': {
@@ -167,12 +170,14 @@ def test_test_mask_environment_specific(mock_masking_file):
                 }
             }
         }
-    })
+    }
 
-    # Mock the apply_masking function
-    with patch('elm.api.apply_masking') as mock_apply_masking:
+    # Mock the load function and apply_masking function
+    with patch('elm.api.load_masking_definitions') as mock_load, \
+         patch('elm.api.apply_masking') as mock_apply_masking:
+
+        mock_load.return_value = initial_definitions
         # Create a masked DataFrame for the mock
-        df = pd.DataFrame({'credit_card': ['1234-5678-9012-3456']})
         masked_df = pd.DataFrame({'credit_card': ['1234************']})
         mock_apply_masking.return_value = masked_df
 
@@ -193,7 +198,7 @@ def test_test_mask_environment_specific(mock_masking_file):
         mock_apply_masking.assert_called_once()
 
 
-def test_apply_masking(sample_dataframe, mock_masking_file):
+def test_apply_masking(sample_dataframe):
     """Test applying masking to a DataFrame."""
     # Set up masking definitions
     test_definitions = {
