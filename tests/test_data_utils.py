@@ -414,7 +414,7 @@ def test_write_to_file():
 
         # Test CSV write
         mock_exists.return_value = False
-        result = write_to_file(df, 'test.csv', format='csv')
+        result = write_to_file(df, 'test.csv', file_format='csv')
 
         # Verify the result
         assert result is True
@@ -425,7 +425,7 @@ def test_write_to_file():
 
         # Test JSON write
         mock_exists.return_value = False
-        result = write_to_file(df, 'test.json', format='json')
+        result = write_to_file(df, 'test.json', file_format='json')
 
         # Verify the result
         assert result is True
@@ -435,7 +435,7 @@ def test_write_to_file():
 
         # Test append mode with existing file
         mock_exists.return_value = True
-        result = write_to_file(df, 'test.csv', format='csv', mode='a')
+        result = write_to_file(df, 'test.csv', file_format='csv', mode='a')
 
         # Verify the result
         assert result is True
