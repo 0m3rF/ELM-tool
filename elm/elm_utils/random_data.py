@@ -75,7 +75,7 @@ def generate_random_date(start_date=None, end_date=None, date_format='%Y-%m-%d')
             start_date = datetime.strptime(start_date, date_format)
         except ValueError:
             start_date = datetime(1970, 1, 1)
-    
+
     if not end_date:
         end_date = datetime.now()
     elif isinstance(end_date, str):
@@ -83,53 +83,53 @@ def generate_random_date(start_date=None, end_date=None, date_format='%Y-%m-%d')
             end_date = datetime.strptime(end_date, date_format)
         except ValueError:
             end_date = datetime.now()
-    
+
     # Calculate the difference in days
     delta_days = (end_date - start_date).days
     if delta_days <= 0:
         delta_days = 365  # Default to 1 year if invalid range
-    
+
     # Generate a random number of days to add
     random_days = random.randint(0, delta_days)
-    
+
     # Add the random days to the start date
     random_date = start_date + timedelta(days=random_days)
-    
+
     # Format the date as a string
     return random_date.strftime(date_format)
 
 def infer_column_type(column_name):
     """Infer the data type of a column based on its name"""
     column_lower = column_name.lower()
-    
+
     # Date-related columns
     date_patterns = ['date', 'created', 'updated', 'timestamp', 'time', 'birthday', 'dob', 'birth']
     if any(pattern in column_lower for pattern in date_patterns):
         return 'date'
-    
+
     # Numeric columns
     numeric_patterns = ['id', 'num', 'count', 'amount', 'price', 'qty', 'quantity', 'age', 'year', 'month', 'day', 'hour', 'minute', 'second']
     if any(pattern in column_lower for pattern in numeric_patterns) or column_lower.endswith('_id'):
         return 'number'
-    
+
     # Email columns
     if 'email' in column_lower:
         return 'email'
-    
+
     # Name columns
     name_patterns = ['name', 'first', 'last', 'user', 'customer', 'employee', 'author']
     if any(pattern in column_lower for pattern in name_patterns):
         return 'name'
-    
+
     # Address columns
     address_patterns = ['address', 'street', 'city', 'state', 'country', 'zip', 'postal']
     if any(pattern in column_lower for pattern in address_patterns):
         return 'address'
-    
+
     # Phone columns
     if any(pattern in column_lower for pattern in ['phone', 'mobile', 'cell', 'fax']):
         return 'phone'
-    
+
     # Default to string
     return 'string'
 
@@ -138,7 +138,7 @@ def generate_random_value(column_name, data_type=None, **kwargs):
     # If data type is not specified, infer it from the column name
     if not data_type:
         data_type = infer_column_type(column_name)
-    
+
     # Generate value based on data type
     if data_type == 'date':
         return generate_random_date(
@@ -169,15 +169,15 @@ def generate_random_value(column_name, data_type=None, **kwargs):
 def generate_random_data(columns, num_records=10, **kwargs):
     """Generate a DataFrame with random data for the specified columns"""
     data = {}
-    
+
     for column in columns:
         # Get column-specific parameters if provided
         column_params = kwargs.get(column, {})
-        
+
         # Generate random values for the column
         data[column] = [
             generate_random_value(
-                column, 
+                column,
                 data_type=column_params.get('type'),
                 length=column_params.get('length', 10),
                 pattern=column_params.get('pattern'),
@@ -189,19 +189,20 @@ def generate_random_data(columns, num_records=10, **kwargs):
                 date_format=column_params.get('date_format', '%Y-%m-%d')
             ) for _ in range(num_records)
         ]
-    
+
     return pd.DataFrame(data)
 
 def get_table_schema_from_db(connection_url, table_name):
     """Get the schema of a table from the database"""
     try:
         # Create a temporary connection to the database
-        engine = pd.io.sql.create_engine(connection_url)
-        
+        from sqlalchemy import create_engine
+        engine = create_engine(connection_url)
+
         # Get the table schema
         query = f"SELECT * FROM {table_name} LIMIT 0"
         df = pd.read_sql(query, engine)
-        
+
         # Return the column names
         return list(df.columns)
     except Exception as e:

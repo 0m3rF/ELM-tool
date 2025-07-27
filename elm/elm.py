@@ -8,7 +8,7 @@ def ensure_env_dir():
         os.makedirs(variables.ENVS_FILE, exist_ok=True)
 
 @click.group()
-@click.version_option()
+@click.help_option('-h', '--help')
 def cli():
     """Extract, Load and Mask Tool for Database Operations"""
     pass

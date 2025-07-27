@@ -1,0 +1,9 @@
+click
+sqlalchemy
+pandas
+platformdirs
+cryptography
+pytest
+pytest-cov
+faker
+pymysql
