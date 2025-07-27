@@ -1,5 +1,4 @@
 import click
-import os
 import pandas as pd
 from elm.elm_utils.random_data import generate_random_data
 from elm.elm_utils.db_utils import get_connection_url, check_table_exists, get_table_columns, write_to_db, write_to_file

@@ -4,7 +4,6 @@ import configparser
 import concurrent.futures
 import json
 import pandas as pd
-from elm.elm_utils import variables
 from elm.elm_utils.data_utils import apply_masking
 from elm.elm_utils.db_utils import get_connection_url, check_table_exists, get_table_columns, execute_query, write_to_db, write_to_file
 
@@ -12,9 +11,9 @@ from elm.elm_utils.db_utils import get_connection_url, check_table_exists, get_t
 config = configparser.ConfigParser()
 
 class AliasedGroup(click.Group):
-    def get_command(self, ctx, cmd_name):
+    def get_command(self, ctx, cmd_name: str):
         try:
-            cmd_name = ALIASES[cmd_name].name
+            cmd_name = ALIASES[cmd_name].name # type: ignore
         except KeyError:
             pass
         return super().get_command(ctx, cmd_name)
@@ -62,14 +61,20 @@ def execute_query(connection_url, query, batch_size=None, environment=None, appl
     except Exception as e:
         raise click.UsageError(f"Error executing query: {str(e)}")
 
-def write_to_file(data, file_path, file_format='csv', mode='w'):
+def write_to_file(data: pd.DataFrame, file_path, file_format='csv', mode='w'):
     """Write data to a file in the specified format"""
     # Create directory if it doesn't exist
     os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
 
     if isinstance(data, pd.DataFrame):
         if file_format.lower() == 'csv':
-            data.to_csv(file_path, index=False, mode=mode)
+            # For CSV, handle append mode specially
+            if mode == 'a' and os.path.exists(file_path):
+                # Append without header
+                data.to_csv(file_path, mode='a', header=False, index=False)
+            else:
+                # Write with header
+                data.to_csv(file_path, index=False)
         elif file_format.lower() == 'json':
             if mode == 'a' and os.path.exists(file_path) and os.path.getsize(file_path) > 0:
                 # Append to existing JSON (this is tricky, we'll need to read, append, and write)
