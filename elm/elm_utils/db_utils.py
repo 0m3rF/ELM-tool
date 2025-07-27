@@ -141,14 +141,14 @@ def write_to_db(data, connection_url, table_name, if_exists='append', batch_size
     except Exception as e:
         raise ValueError(f"Error writing to database: {str(e)}")
 
-def write_to_file(data, file_path, format='csv', mode='w'):
+def write_to_file(data, file_path, file_format='csv', mode='w'):
     """Write data to a file"""
     try:
         # Create directory if it doesn't exist
         os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
 
         # Write based on format
-        if format.lower() == 'csv':
+        if file_format.lower() == 'csv':
             # For CSV, handle append mode specially
             if mode == 'a' and os.path.exists(file_path):
                 # Append without header
@@ -156,7 +156,7 @@ def write_to_file(data, file_path, format='csv', mode='w'):
             else:
                 # Write with header
                 data.to_csv(file_path, index=False)
-        elif format.lower() == 'json':
+        elif file_format.lower() == 'json':
             # For JSON, handle append mode specially
             if mode == 'a' and os.path.exists(file_path):
                 # Read existing JSON
@@ -173,7 +173,7 @@ def write_to_file(data, file_path, format='csv', mode='w'):
                 # Write new JSON
                 data.to_json(file_path, orient='records', indent=2)
         else:
-            raise ValueError(f"Unsupported file format: {format}")
+            raise ValueError(f"Unsupported file format: {file_format}")
 
         return True
     except Exception as e:

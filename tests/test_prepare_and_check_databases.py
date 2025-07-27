@@ -176,7 +176,7 @@ class DockerManager:
         cmd = [
             "docker", "run", "-d",
             "--name", config.name,
-            "-p", f"{config.port}:{config.port}"
+            "-p", f"{config.port+1}:{config.port}" # in case of there is already deployed db use next port.
         ]
         
         # Add environment variables
@@ -312,7 +312,7 @@ class DatabaseConfigs:
             "postgresql": DatabaseConfig(
                 name="ELM_TOOL_postgresql",
                 image="postgres:15-alpine",
-                port=5433,
+                port=5432,
                 env_vars={
                     "POSTGRES_DB": "ELM_TOOL_db",
                     "POSTGRES_USER": "ELM_TOOL_user",
@@ -325,7 +325,7 @@ class DatabaseConfigs:
             "mysql": DatabaseConfig(
                 name="ELM_TOOL_mysql",
                 image="mysql:8.0",
-                port=3307,
+                port=3306,
                 env_vars={
                     "MYSQL_DATABASE": "ELM_TOOL_db",
                     "MYSQL_USER": "ELM_TOOL_user",
@@ -339,7 +339,7 @@ class DatabaseConfigs:
             "mssql": DatabaseConfig(
                 name="ELM_TOOL_mssql",
                 image="mcr.microsoft.com/mssql/server:2022-latest",
-                port=1434,
+                port=1433,
                 env_vars={
                     "ACCEPT_EULA": "Y",
                     "SA_PASSWORD": "ELM_TOOL_Password123!",
@@ -352,7 +352,7 @@ class DatabaseConfigs:
             "oracle": DatabaseConfig(
                 name="ELM_TOOL_oracle",
                 image="gvenzl/oracle-xe:21-slim",
-                port=1522,
+                port=1521,
                 env_vars={
                     "ORACLE_PASSWORD": "ELM_TOOL_password",
                     "APP_USER": "ELM_TOOL_user",
