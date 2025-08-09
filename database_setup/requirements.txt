@@ -1,0 +1,2 @@
+# Requirements for database_setup.py
+click>=8.0.0
