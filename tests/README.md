@@ -2,6 +2,25 @@
 
 This directory contains unit tests for the ELM Tool using the pytest framework.
 
+# To-Do Tests
+
+- environment create
+- environment list
+- environment show
+- environment update
+- environment delete
+- environment test
+- environment execute
+- copy db2file
+- copy file2db
+- copy db2db
+- mask add
+- mask remove
+- mask list
+- mask test
+- generate data
+- generate save
+
 ## Running Tests
 
 To run all tests:
@@ -26,15 +45,9 @@ To run a specific test:
 pytest tests/test_environment.py::test_create_environment
 ```
 
-To run tests with coverage:
-
-```bash
-pytest --cov=elm
-```
-
 ## Test Structure
 
-The tests are organized by functionality:
+The tests are organized by main command and some functionality:
 
 - `test_environment.py`: Tests for environment management commands
 - `test_copy.py`: Tests for data copy commands
@@ -47,7 +60,4 @@ The tests are organized by functionality:
 Common test fixtures are defined in `conftest.py`:
 
 - `temp_env_dir`: Creates a temporary directory for environment files
-- `mock_db_connection`: Mocks SQLAlchemy database connections
 - `sample_dataframe`: Provides a sample DataFrame for testing
-- `mock_file_operations`: Mocks file read/write operations
-- `mock_masking_file`: Mocks masking definitions file operations
