@@ -1,31 +1,16 @@
 import click
-import os
-import json
 import pandas as pd
-from elm.elm_utils import variables
-from elm.elm_utils.mask_algorithms import MASKING_ALGORITHMS
+from elm.core import masking as core_mask
 
-
+# Keep these functions for backward compatibility with API
 def load_masking_definitions():
     """Load masking definitions from the masking file"""
-    if not os.path.exists(variables.MASK_FILE):
-        return {'global': {}, 'environments': {}}
-
-    try:
-        with open(variables.MASK_FILE, 'r') as f:
-            return json.load(f)
-    except Exception as e:
-        click.echo(f"Error loading masking definitions: {str(e)}")
-        return {'global': {}, 'environments': {}}
+    return core_mask.load_masking_definitions()
 
 def save_masking_definitions(definitions):
     """Save masking definitions to the masking file"""
-    # Create directory if it doesn't exist
-    os.makedirs(os.path.dirname(variables.MASK_FILE), exist_ok=True)
-
     try:
-        with open(variables.MASK_FILE, 'w') as f:
-            json.dump(definitions, f, indent=2)
+        core_mask.save_masking_definitions(definitions)
         return True
     except Exception as e:
         click.echo(f"Error saving masking definitions: {str(e)}")
@@ -106,38 +91,18 @@ def add(column, algorithm, environment, length):
         Nullify a column in development:
           elm-tool mask add --column ssn --algorithm nullify --environment dev
     """
-    # Load existing definitions
-    definitions = load_masking_definitions()
+    # Use core module to add mask
+    result = core_mask.add_mask(
+        column=column,
+        algorithm=algorithm,
+        environment=environment,
+        length=length
+    )
 
-    # Prepare the masking configuration
-    mask_config = {
-        'algorithm': algorithm.lower(),
-        'params': {}
-    }
-
-    # Add algorithm-specific parameters
-    if algorithm.lower() == 'star_length':
-        mask_config['params']['length'] = length
-
-    # Add to global or environment-specific definitions
-    if environment:
-        if 'environments' not in definitions:
-            definitions['environments'] = {}
-        if environment not in definitions['environments']:
-            definitions['environments'][environment] = {}
-        definitions['environments'][environment][column] = mask_config
-        click.echo(f"Added masking for column '{column}' in environment '{environment}' using {algorithm} algorithm")
+    if result.success:
+        click.echo(result.message)
     else:
-        if 'global' not in definitions:
-            definitions['global'] = {}
-        definitions['global'][column] = mask_config
-        click.echo(f"Added global masking for column '{column}' using {algorithm} algorithm")
-
-    # Save the updated definitions
-    if save_masking_definitions(definitions):
-        click.echo("Masking definition saved successfully")
-    else:
-        click.echo("Failed to save masking definition")
+        raise click.UsageError(result.message)
 
 @mask.command()
 @click.option("-c", "--column", required=True, help="Column name to remove masking for")
@@ -153,30 +118,13 @@ def remove(column, environment):
         Remove environment-specific masking:
           elm-tool mask remove --column credit_card --environment prod
     """
-    # Load existing definitions
-    definitions = load_masking_definitions()
+    # Use core module to remove mask
+    result = core_mask.remove_mask(column=column, environment=environment)
 
-    # Remove from global or environment-specific definitions
-    if environment:
-        if ('environments' in definitions and
-            environment in definitions['environments'] and
-            column in definitions['environments'][environment]):
-            del definitions['environments'][environment][column]
-            click.echo(f"Removed masking for column '{column}' in environment '{environment}'")
-        else:
-            click.echo(f"No masking found for column '{column}' in environment '{environment}'")
+    if result.success:
+        click.echo(result.message)
     else:
-        if 'global' in definitions and column in definitions['global']:
-            del definitions['global'][column]
-            click.echo(f"Removed global masking for column '{column}'")
-        else:
-            click.echo(f"No global masking found for column '{column}'")
-
-    # Save the updated definitions
-    if save_masking_definitions(definitions):
-        click.echo("Masking definition updated successfully")
-    else:
-        click.echo("Failed to update masking definition")
+        click.echo(result.message)  # Show error message but don't raise exception
 
 @mask.command()
 @click.option("-e", "--environment", help="Environment name (if not specified, shows all)")
@@ -252,36 +200,17 @@ def test(column, value, environment):
         Test environment-specific masking:
           elm-tool mask test --column credit_card --value "4111111111111111" --environment prod
     """
-    # Load existing definitions
-    definitions = load_masking_definitions()
+    # Use core module to test mask
+    result = core_mask.test_mask(column=column, value=value, environment=environment)
 
-    # Find the masking configuration
-    mask_config = None
-    if environment:
-        if ('environments' in definitions and
-            environment in definitions['environments'] and
-            column in definitions['environments'][environment]):
-            mask_config = definitions['environments'][environment][column]
-            click.echo(f"Using environment '{environment}' masking for column '{column}'")
-
-    if mask_config is None and 'global' in definitions and column in definitions['global']:
-        mask_config = definitions['global'][column]
-        click.echo(f"Using global masking for column '{column}'")
-
-    if mask_config is None:
-        click.echo(f"No masking definition found for column '{column}'")
-        return
-
-    # Apply masking
-    algorithm = mask_config.get('algorithm', 'star')
-    params = mask_config.get('params', {})
-
-    if algorithm in MASKING_ALGORITHMS:
-        masked_value = MASKING_ALGORITHMS[algorithm](value, **params)
-        click.echo(f"Original value: {value}")
-        click.echo(f"Masked value: {masked_value}")
+    if result.success:
+        data = result.data
+        click.echo(f"Original value: {data['original']}")
+        click.echo(f"Masked value: {data['masked']}")
+        if data.get('scope'):
+            click.echo(f"Using {data['scope']} masking for column '{column}'")
     else:
-        click.echo(f"Unknown masking algorithm: {algorithm}")
+        click.echo(result.message)
 
 
 
