@@ -20,7 +20,7 @@ class DatabaseConfigs:
             "postgresql": DatabaseConfig(
                 name="ELM_TOOL_postgresql",
                 image="postgres:15-alpine",
-                port=5432,
+                port=5433,  # Updated to match running container port
                 env_vars={
                     "POSTGRES_DB": "ELM_TOOL_db",
                     "POSTGRES_USER": "ELM_TOOL_user",
@@ -33,7 +33,7 @@ class DatabaseConfigs:
             "mysql": DatabaseConfig(
                 name="ELM_TOOL_mysql",
                 image="mysql:8.0",
-                port=3306,
+                port=3307,  # Updated to match running container port
                 env_vars={
                     "MYSQL_DATABASE": "ELM_TOOL_db",
                     "MYSQL_USER": "ELM_TOOL_user",
@@ -47,7 +47,7 @@ class DatabaseConfigs:
             "mssql": DatabaseConfig(
                 name="ELM_TOOL_mssql",
                 image="mcr.microsoft.com/mssql/server:2022-latest",
-                port=1433,
+                port=1434,  # Updated to match running container port
                 env_vars={
                     "ACCEPT_EULA": "Y",
                     "SA_PASSWORD": MSSQL_PASSWORD,
@@ -60,13 +60,13 @@ class DatabaseConfigs:
             "oracle": DatabaseConfig(
                 name="ELM_TOOL_oracle",
                 image="gvenzl/oracle-xe:21-slim",
-                port=1521,
+                port=1522,  # Updated to match running container port
                 env_vars={
                     "ORACLE_PASSWORD": ORACLE_PASSWORD,
                     "APP_USER": "ELM_TOOL_user",
                     "APP_USER_PASSWORD": ORACLE_PASSWORD
                 },
-                health_check_cmd=["sqlplus", "-s", f"ELM_TOOL_user/{ORACLE_PASSWORD}@localhost:1521/XE", "<<<", "SELECT 1 FROM DUAL;"],
+                health_check_cmd=["sqlplus", "-s", f"ELM_TOOL_user/{ORACLE_PASSWORD}@localhost:1522/XE", "<<<", "SELECT 1 FROM DUAL;"],
                 wait_time=90,
                 startup_priority=4  # Start last (slowest to start)
             )
