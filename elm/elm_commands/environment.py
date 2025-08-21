@@ -2,13 +2,8 @@ import click
 import os
 import sys
 import subprocess
-import configparser
 import pandas as pd
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import SQLAlchemyError
-from elm.elm_utils import variables, encryption
-
-config = configparser.ConfigParser()
+from elm.core import environment as core_env
 
 # Database-specific dependencies
 DB_PACKAGES = {
@@ -42,59 +37,6 @@ def ensure_db_driver_installed(db_type):
             print(f"Failed to install {package_name}: {str(e)}")
             print(f"Please install {package_name} manually using: pip install {package_name}")
 
-def get_connection_url(env_name, encryption_key=None):
-    """Get a SQLAlchemy connection URL for the specified environment"""
-    config.read(variables.ENVS_FILE)
-
-    # Check if the environment exists
-    if not env_name in config.sections():
-        raise click.UsageError(f"Environment '{env_name}' not found")
-
-    # Check if the environment is encrypted
-    is_encrypted = config[env_name].get("is_encrypted", 'False') == 'True'
-
-    # Get environment details
-    if is_encrypted:
-        if not encryption_key:
-            raise click.UsageError(f"Environment '{env_name}' is encrypted. Provide an encryption key.")
-
-        try:
-            # Decrypt the environment
-            decrypted_env = encryption.decrypt_environment(dict(config[env_name]), encryption_key)
-
-            # Get decrypted details
-            env_type = decrypted_env["type"].upper()
-            host = decrypted_env["host"]
-            port = decrypted_env["port"]
-            user = decrypted_env["user"]
-            password = decrypted_env["password"]
-            service = decrypted_env["service"]
-        except Exception as e:
-            raise click.UsageError(f"Failed to decrypt environment: {str(e)}. Check your encryption key.")
-    else:
-        # Get unencrypted details
-        env_type = config[env_name]["type"].upper()
-        host = config[env_name]["host"]
-        port = config[env_name]["port"]
-        user = config[env_name]["user"]
-        password = config[env_name]["password"]
-        service = config[env_name]["service"]
-
-    # Create connection URL based on database type
-    if env_type == "ORACLE":
-        # Oracle connection string format
-        return f"oracle+cx_oracle://{user}:{password}@{host}:{port}/{service}"
-    elif env_type == "POSTGRES":
-        # PostgreSQL connection string format
-        return f"postgresql://{user}:{password}@{host}:{port}/{service}"
-    elif env_type == "MYSQL":
-        # MySQL connection string format
-        return f"mysql+pymysql://{user}:{password}@{host}:{port}/{service}"
-    elif env_type == "MSSQL":
-        # MSSQL connection string format
-        return f"mssql+pyodbc://{user}:{password}@{host}:{port}/{service}?driver=ODBC+Driver+17+for+SQL+Server"
-    else:
-        raise click.UsageError(f"Unsupported database type: {env_type}")
 
 #Added for alias support at the end of this file.
 class AliasedGroup(click.Group):
@@ -161,23 +103,6 @@ def create(name, host, port, user, password, service, type, overwrite, encrypt, 
         Create an environment with user input prompts:
           elm-tool environment create dev-pg --user-input
     """
-
-    # Check if environment file exists
-    if( not os.path.isfile(variables.ENVS_FILE)): # create it if not exists
-        with open(variables.ENVS_FILE, "w") as env_file:
-            env_file.close()
-
-    config.read(variables.ENVS_FILE)
-
-    if name in config and not overwrite:
-        raise click.UsageError("Name is already exists. To overwrite use '-o' / '--overwrite' existing environment definition.")
-    else:
-        config[name] = {}
-
-
-    if name == "*":
-        raise click.UsageError("Cannot use '*' as environment name.")
-
     # Handle user input mode
     if user_input:
         # Prompt for all required fields if not provided
@@ -213,33 +138,24 @@ def create(name, host, port, user, password, service, type, overwrite, encrypt, 
         # Raise an error if --encrypt is True but --encryption-key is missing
         raise click.UsageError("Option '--encryption-key' / '-k' is required when using '--encrypt' / '-e'.")
 
-    # Prepare environment data
-    env_data = {
-        "host": host,
-        "port": str(port),
-        "user": user,
-        "password": password,
-        "service": service,
-        "type": type
-    }
+    # Use core module to create environment
+    result = core_env.create_environment(
+        name=name,
+        host=host,
+        port=port,
+        user=user,
+        password=password,
+        service=service,
+        db_type=type,
+        encrypt=encrypt,
+        encryption_key=encryption_key,
+        overwrite=overwrite
+    )
 
-    if encrypt:
-        # Encrypt the environment data
-        encrypted_env = encryption.encrypt_environment(env_data, encryption_key)
-        # Update config with encrypted data
-        for key, value in encrypted_env.items():
-            config[name][key] = value
+    if result.success:
+        click.echo("Environment created successfully")
     else:
-        # Store unencrypted data
-        config[name]["is_encrypted"] = 'False'
-        for key, value in env_data.items():
-            config[name][key] = value
-
-    with open(variables.ENVS_FILE, 'w') as configfile:
-        config.write(configfile)
-        configfile.close()
-
-    print("Environment created successfully")
+        raise click.UsageError(result.message)
 
 @environment.command()
 @click.option("-a", "--all", is_flag=True, default=False, help="Show all content of the environment")
@@ -267,32 +183,47 @@ def list(all, host, port, user, password, service, type):
         Show specific information (user and service):
           elm-tool environment list --user --service
     """
-    config.read(variables.ENVS_FILE)
+    # Use core module to list environments
+    result = core_env.list_environments(show_all=all)
 
-    if not config.sections():
-        print("No environments defined.")
+    if not result.success:
+        click.echo(f"Error: {result.message}")
         return
 
-    for envs in config.sections():
-        is_encrypted = config[envs].get("is_encrypted", 'False') == 'True'
+    environments = result.data
+
+    if not environments:
+        click.echo("No environments defined.")
+        return
+
+    for env in environments:
+        env_name = env['name']
+        is_encrypted = env.get("is_encrypted", 'False') == 'True'
 
         if is_encrypted:
-            print(f"[{envs}] (ENCRYPTED)")
+            click.echo(f"[{env_name}] (ENCRYPTED)")
         else:
-            print(f"[{envs}]")
-            if(host or all):
-                print("host = " + config[envs]["host"])
-            if(port  or all):
-                print("port = " + config[envs]["port"])
-            if(user or all):
-                print("user = " + config[envs]["user"])
-            if(password or all):
-                print("password = " + config[envs]["password"])
-            if(service or all):
-                print("service = " + config[envs]["service"])
-            if(type or all):
-                print("type = " + config[envs]["type"])
-        print("")
+            click.echo(f"[{env_name}]")
+            if all:
+                # Show all fields when --all is specified
+                for key, value in env.items():
+                    if key != 'name':
+                        click.echo(f"{key} = {value}")
+            else:
+                # Show specific fields based on flags
+                if host and 'host' in env:
+                    click.echo(f"host = {env['host']}")
+                if port and 'port' in env:
+                    click.echo(f"port = {env['port']}")
+                if user and 'user' in env:
+                    click.echo(f"user = {env['user']}")
+                if password and 'password' in env:
+                    click.echo(f"password = {env['password']}")
+                if service and 'service' in env:
+                    click.echo(f"service = {env['service']}")
+                if type and 'type' in env:
+                    click.echo(f"type = {env['type']}")
+        click.echo("")
 
 @environment.command()
 @click.argument('name')
@@ -308,16 +239,12 @@ def delete(name):
         Using the alias:
           elm-tool environment rm old-env
     """
-    config.read(variables.ENVS_FILE)
+    result = core_env.delete_environment(name=name)
 
-    if (not name in config.sections()):
-        raise click.UsageError("Environment is not found")
-
-    del config[name]
-
-    with open(variables.ENVS_FILE, 'w') as configfile:
-        config.write(configfile)
-        configfile.close()
+    if result.success:
+        click.echo(f"Environment '{name}' deleted successfully")
+    else:
+        raise click.UsageError(result.message)
 
 @environment.command()
 @click.argument('name')
@@ -336,42 +263,23 @@ def show(name, encryption_key):
         Using the inspect alias:
           elm-tool environment inspect dev-pg
     """
-    config.read(variables.ENVS_FILE)
+    result = core_env.get_environment(name=name, encryption_key=encryption_key)
 
-    if (not name in config.sections()):
-        raise click.UsageError("Environment is not found")
+    if not result.success:
+        raise click.UsageError(result.message)
 
-    is_encrypted = config[name].get("is_encrypted", 'False') == 'True'
+    env = result.data
+    is_encrypted = env.get("is_encrypted", 'False') == 'True'
 
-    if not is_encrypted:
-        # Show unencrypted environment
-        print(f"[{name}]")
-        print("host = " + config[name]["host"])
-        print("port = " + config[name]["port"])
-        print("user = " + config[name]["user"])
-        print("password = " + config[name]["password"])
-        print("service = " + config[name]["service"])
-        print("type = " + config[name]["type"])
+    if is_encrypted and encryption_key:
+        click.echo(f"[{name}] (Decrypted)")
     else:
-        # Handle encrypted environment
-        if not encryption_key:
-            print(f"Environment '{name}' is encrypted. Provide an encryption key to view it.")
-            return
+        click.echo(f"[{name}]")
 
-        try:
-            # Decrypt the environment
-            decrypted_env = encryption.decrypt_environment(dict(config[name]), encryption_key)
-
-            # Display decrypted environment
-            print(f"[{name}] (Decrypted)")
-            print("host = " + decrypted_env["host"])
-            print("port = " + decrypted_env["port"])
-            print("user = " + decrypted_env["user"])
-            print("password = " + decrypted_env["password"])
-            print("service = " + decrypted_env["service"])
-            print("type = " + decrypted_env["type"])
-        except Exception as e:
-            print(f"Failed to decrypt environment: {str(e)}. Check your encryption key.")
+    # Display environment details
+    for key, value in env.items():
+        if key != 'name':
+            click.echo(f"{key} = {value}")
 
 @environment.command()
 @click.argument('name')
@@ -408,109 +316,27 @@ def update(name, host, port, user, password, service, type, encrypt, encryption_
     if encrypt and not encryption_key:
         raise click.UsageError("Option '--encryption-key' / '-k' is required when using '--encrypt' / '-e'.")
 
-    # Read the config file
-    config.read(variables.ENVS_FILE)
-
-    # Check if the environment exists
-    if not name in config.sections():
-        raise click.UsageError(f"Environment '{name}' not found")
-
     # Check if any field is provided to update
     if not any([host, port, user, password, service, type, encrypt]):
         raise click.UsageError("At least one field must be provided to update")
 
-    # Get current encryption status
-    was_encrypted = config[name].get("is_encrypted", 'False') == 'True'
+    # Use core module to update environment
+    result = core_env.update_environment(
+        name=name,
+        host=host,
+        port=port,
+        user=user,
+        password=password,
+        service=service,
+        db_type=type,
+        encrypt=encrypt,
+        encryption_key=encryption_key
+    )
 
-    # Collect current environment data
-    current_env = {}
-    for field in ['host', 'port', 'user', 'password', 'service', 'type']:
-        if field in config[name]:
-            current_env[field] = config[name][field]
-
-    # Collect updated fields
-    updated_fields = {}
-    if host:
-        updated_fields['host'] = host
-    if port:
-        updated_fields['port'] = str(port)
-    if user:
-        updated_fields['user'] = user
-    if password:
-        updated_fields['password'] = password
-    if service:
-        updated_fields['service'] = service
-    if type:
-        updated_fields['type'] = type
-
-    # Handle encryption scenarios
-    if was_encrypted and not encrypt:
-        # Decrypt first, then update, then re-encrypt
-        if not encryption_key:
-            raise click.UsageError("Option '--encryption-key' / '-k' is required to update an encrypted environment.")
-
-        try:
-            # Decrypt the environment
-            decrypted_env = encryption.decrypt_environment(dict(config[name]), encryption_key)
-
-            # Update the decrypted environment
-            for field, value in updated_fields.items():
-                decrypted_env[field] = value
-
-            # Re-encrypt the environment
-            encrypted_env = encryption.encrypt_environment(decrypted_env, encryption_key)
-
-            # Update config with re-encrypted data
-            for key, value in encrypted_env.items():
-                config[name][key] = value
-
-        except Exception as e:
-            raise click.UsageError(f"Failed to decrypt environment: {str(e)}. Check your encryption key.")
-
-    elif not was_encrypted and encrypt:
-        # Encrypt the environment
-        # Merge current environment with updates
-        merged_env = current_env.copy()
-        merged_env.update(updated_fields)
-
-        # Encrypt the merged environment
-        encrypted_env = encryption.encrypt_environment(merged_env, encryption_key)
-
-        # Update config with encrypted data
-        for key, value in encrypted_env.items():
-            config[name][key] = value
-
-    elif was_encrypted and encrypt:
-        # Re-encrypt with a new key
-        try:
-            # Decrypt with old key
-            decrypted_env = encryption.decrypt_environment(dict(config[name]), encryption_key)
-
-            # Update decrypted environment
-            for field, value in updated_fields.items():
-                decrypted_env[field] = value
-
-            # Re-encrypt with the same key (or could use a new key parameter)
-            encrypted_env = encryption.encrypt_environment(decrypted_env, encryption_key)
-
-            # Update config
-            for key, value in encrypted_env.items():
-                config[name][key] = value
-
-        except Exception as e:
-            raise click.UsageError(f"Failed to re-encrypt environment: {str(e)}. Check your encryption key.")
-
-    else:  # not was_encrypted and not encrypt
-        # Simple update of unencrypted environment
-        for field, value in updated_fields.items():
-            config[name][field] = value
-
-    # Save the updated configuration
-    with open(variables.ENVS_FILE, 'w') as configfile:
-        config.write(configfile)
-        configfile.close()
-
-    print(f"Environment '{name}' updated successfully")
+    if result.success:
+        click.echo(f"Environment '{name}' updated successfully")
+    else:
+        raise click.UsageError(result.message)
 
 @environment.command()
 @click.argument('name')
@@ -530,84 +356,26 @@ def test(name, encryption_key=None):
         Using the validate alias:
           elm-tool environment validate dev-pg
     """
-    # Use the name directly as it's now a required argument
-    env_name = name
-    from sqlalchemy import create_engine
-    from sqlalchemy.exc import SQLAlchemyError
-
-    # Read the config file
-    config.read(variables.ENVS_FILE)
-
-    # Check if the environment exists
-    if not env_name in config.sections():
-        raise click.UsageError(f"Environment '{env_name}' not found")
-
-    # Check if the environment is encrypted
-    is_encrypted = config[env_name].get("is_encrypted", 'False') == 'True'
-
-    # Get environment details
-    if is_encrypted:
-        if not encryption_key:
-            raise click.UsageError(f"Environment '{env_name}' is encrypted. Provide an encryption key to test it.")
-
-        try:
-            # Decrypt the environment
-            decrypted_env = encryption.decrypt_environment(dict(config[env_name]), encryption_key)
-
-            # Get decrypted details
-            env_type = decrypted_env["type"].upper()
-            host = decrypted_env["host"]
-            port = decrypted_env["port"]
-            user = decrypted_env["user"]
-            password = decrypted_env["password"]
-            service = decrypted_env["service"]
-        except Exception as e:
-            raise click.UsageError(f"Failed to decrypt environment: {str(e)}. Check your encryption key.")
-    else:
-        # Get unencrypted details
-        env_type = config[env_name]["type"].upper()
-        host = config[env_name]["host"]
-        port = config[env_name]["port"]
-        user = config[env_name]["user"]
-        password = config[env_name]["password"]
-        service = config[env_name]["service"]
-
-    # Ensure the required database driver is installed
-    ensure_db_driver_installed(env_type)
-
-    # Create connection URL based on database type
-    connection_url = None
-    if env_type == "ORACLE":
-        # Oracle connection string format
-        connection_url = f"oracle+cx_oracle://{user}:{password}@{host}:{port}/{service}"
-    elif env_type == "POSTGRES":
-        # PostgreSQL connection string format
-        connection_url = f"postgresql://{user}:{password}@{host}:{port}/{service}"
-    elif env_type == "MYSQL":
-        # MySQL connection string format
-        connection_url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{service}"
-    elif env_type == "MSSQL":
-        # MSSQL connection string format
-        connection_url = f"mssql+pyodbc://{user}:{password}@{host}:{port}/{service}?driver=ODBC+Driver+17+for+SQL+Server"
-    else:
-        raise click.UsageError(f"Unsupported database type: {env_type}")
-
-    print(f"Testing connection to {env_type} database at {host}:{port}...")
-
+    # Ensure the required database driver is installed for the environment
     try:
-        # Create engine and attempt to connect
-        engine = create_engine(connection_url)
-        connection = engine.connect()
-        connection.close()
-        print(f"✓ Connection successful to {env_type} database at {host}:{port}")
-    except SQLAlchemyError as e:
-        print(f"✗ Connection failed: {str(e)}")
-        return False
-    except Exception as e:
-        print(f"✗ Unexpected error: {str(e)}")
-        return False
+        # Get environment details to check database type
+        env_result = core_env.get_environment(name=name, encryption_key=encryption_key)
+        if env_result.success and env_result.data:
+            env_type = env_result.data.get('type', '').upper()
+            if env_type:
+                ensure_db_driver_installed(env_type)
+    except Exception:
+        pass  # Continue with test even if driver check fails
 
-    return True
+    # Use core module to test environment
+    result = core_env.test_environment(name=name, encryption_key=encryption_key)
+
+    if result.success:
+        click.echo(f"✓ {result.message}")
+        return True
+    else:
+        click.echo(f"✗ {result.message}")
+        return False
 
 @environment.command()
 @click.argument('name')
@@ -628,27 +396,22 @@ def execute(name, query, encryption_key):
         Using the exec alias:
           elm-tool environment exec dev-pg --query "SELECT COUNT(*) FROM orders"
     """
-    try:
-        # Get connection URL
-        connection_url = get_connection_url(name, encryption_key)
+    # Use core module to execute SQL
+    result = core_env.execute_sql(
+        environment=name,
+        query=query,
+        encryption_key=encryption_key
+    )
 
-        # Execute the query
-        engine = create_engine(connection_url)
-        with engine.connect() as connection:
-            result = connection.execute(text(query))
-            if result.returns_rows:
-                # Convert result to DataFrame for display
-                df = pd.DataFrame(result.fetchall())
-                if not df.empty:
-                    df.columns = result.keys() # type: ignore
-                    click.echo(df.to_string(index=False))
-                else:
-                    click.echo("Query executed successfully. No rows returned.")
-            else:
-                click.echo("Query executed successfully. No result set.")
-
-    except Exception as e:
-        click.echo(f"Error: {str(e)}")
+    if result.success:
+        if result.data:
+            # Convert data to DataFrame and display
+            df = pd.DataFrame(result.data)
+            click.echo(df.to_string(index=False))
+        else:
+            click.echo(result.message)
+    else:
+        click.echo(f"Error: {result.message}")
 
 ALIASES = {
     "new": create,

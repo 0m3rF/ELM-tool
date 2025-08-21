@@ -1,7 +1,6 @@
 import click
 import pandas as pd
-from elm.elm_utils.random_data import generate_random_data
-from elm.elm_utils.db_utils import get_connection_url, check_table_exists, get_table_columns, write_to_db, write_to_file
+from elm.core import generation as core_gen
 
 class AliasedGroup(click.Group):
     def get_command(self, ctx, cmd_name):
@@ -57,96 +56,47 @@ def data(num_records, columns, environment, table, output, format, string_length
         Generate data and write to database:
           elm-tool generate data --environment dev --table users --num-records 50 --write-to-db
     """
-    try:
-        # Parse columns if provided
-        column_list = []
-        if columns:
-            column_list = [col.strip() for col in columns.split(',')]
+    # Parse columns if provided
+    column_list = None
+    if columns:
+        column_list = [col.strip() for col in columns.split(',')]
 
-        # Get schema from database if environment and table are provided
-        if environment and table:
-            # Get connection URL
-            connection_url = get_connection_url(environment)
+    # Prepare pattern dictionary if pattern is provided
+    pattern_dict = None
+    if pattern and column_list:
+        pattern_dict = {col: pattern for col in column_list}
 
-            # Check if table exists
-            if not check_table_exists(connection_url, table):
-                click.echo(f"Table '{table}' does not exist in environment '{environment}'")
-                return
+    # Use core module to generate and save data
+    result = core_gen.generate_and_save(
+        num_records=num_records,
+        columns=column_list,
+        environment=environment,
+        table=table,
+        output_file=output,
+        file_format=format.lower(),
+        write_to_db=write_to_db,
+        mode=mode,
+        string_length=string_length,
+        pattern=pattern_dict,
+        min_number=min_number,
+        max_number=max_number,
+        decimal_places=decimal_places,
+        start_date=start_date,
+        end_date=end_date,
+        date_format=date_format
+    )
 
-            # Get table columns
-            db_columns = get_table_columns(connection_url, table)
-            if not db_columns:
-                click.echo(f"Could not retrieve columns for table '{table}'")
-                return
-
-            # Use provided columns or all columns from table
-            if not column_list:
-                column_list = db_columns
-            else:
-                # Validate that all provided columns exist in the table
-                missing_columns = set(column_list) - set(db_columns)
-                if missing_columns:
-                    click.echo(f"The following columns do not exist in table '{table}': {', '.join(missing_columns)}")
-                    return
-
-        # Ensure we have columns to generate data for
-        if not column_list:
-            click.echo("No columns specified. Please provide columns or a table schema.")
-            return
-
-        # Prepare column parameters
-        column_params = {}
-        for column in column_list:
-            column_params[column] = {
-                'type': None,  # Will be inferred
-                'length': string_length,
-                'pattern': pattern,
-                'min_val': min_number,
-                'max_val': max_number,
-                'decimal_places': decimal_places,
-                'start_date': start_date,
-                'end_date': end_date,
-                'date_format': date_format
-            }
-
-        # Generate random data
-        click.echo(f"Generating {num_records} random records for columns: {', '.join(column_list)}")
-        data = generate_random_data(column_list, num_records, **column_params)
-
-        # Write to database if requested
-        if write_to_db and environment and table:
-            # Map mode to SQLAlchemy if_exists parameter
-            if_exists_map = {
-                'APPEND': 'append',
-                'REPLACE': 'replace',
-                'FAIL': 'fail'
-            }
-            if_exists = if_exists_map[mode.upper()]
-
-            # Write to database
-            write_to_db(data, connection_url, table, if_exists)
-            click.echo(f"Successfully wrote {num_records} records to table '{table}' in environment '{environment}'")
-
-        # Write to file if output is provided
-        elif output:
-            # Write to file
-            write_to_file(data, output, format.lower())
-            click.echo(f"Successfully wrote {num_records} records to file '{output}'")
-
-        # Otherwise, print to console
-        else:
-            # Print to console (limit to 10 records for readability)
-            display_data = data.head(10) if len(data) > 10 else data
+    if result.success:
+        click.echo(result.message)
+        if not output and not write_to_db and result.data:
+            # Print to console if no output specified
+            df = pd.DataFrame(result.data)
             if format.upper() == 'JSON':
-                click.echo(display_data.to_json(orient='records', indent=2))
+                click.echo(df.to_json(orient='records', indent=2))
             else:
-                click.echo(display_data.to_string(index=False))
-
-            if len(data) > 10:
-                click.echo(f"\n... and {len(data) - 10} more records (showing first 10 only)")
-
-    except Exception as e:
-        click.echo(f"Error generating random data: {str(e)}")
+                click.echo(df.to_string(index=False))
+    else:
+        raise click.UsageError(result.message)
 
 # Define command aliases
 ALIASES = {
