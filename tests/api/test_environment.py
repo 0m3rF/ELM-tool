@@ -5,9 +5,9 @@ import configparser
 import pytest
 import pandas as pd
 import elm
-from .test_prepare_and_check_databases import DatabaseConfigs
+from ..test_prepare_and_check_databases import DatabaseConfigs
 from elm.elm_utils import variables
-from .tst_variables import *    
+from ..tst_variables import *    
 
 @pytest.mark.dependency(name="create_environment")
 def test_create_pg_environment(temp_env_dir):

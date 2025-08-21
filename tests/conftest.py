@@ -1,6 +1,7 @@
 from elm.elm_utils import variables
 import pytest
 import pandas as pd
+import datetime
 from unittest.mock import MagicMock
 
 
@@ -8,42 +9,26 @@ from unittest.mock import MagicMock
 def temp_env_dir():
     return variables.ENVS_FILE
 
-
 @pytest.fixture
 def sample_dataframe():
     """Create a sample DataFrame for testing."""
     return pd.DataFrame({
-        'id': [1, 2, 3],
-        'name': ['Alice', 'Bob', 'Charlie'],
-        'email': ['alice@example.com', 'bob@example.com', 'charlie@example.com'],
-        'password': ['secret123', 'password456', 'mypassword']
+        'id': [1, 2, 3, 4, 5],
+        'name': ['Alice', 'Bob', 'Charlie', 'Diana', 'Ethan'],
+        'email': [
+            'alice@example.com',
+            'bob@example.com',
+            'charlie@example.com',
+            'diana@example.com',
+            'ethan@example.com'
+        ],
+        'password': ['secret123', 'password456', 'mypassword', '12345678', 'hunter2'],
+        'balance': [123.45, 678.90, 234.56, 890.12, 345.67],
+        'signup_date': [
+            datetime(2022, 1, 10),
+            datetime(2022, 3, 15),
+            datetime(2022, 5, 20),
+            datetime(2022, 7, 25),
+            datetime(2022, 9, 30)
+        ]
     })
-
-
-@pytest.fixture
-def mock_masking_file():
-    """Create a mock masking file for testing."""
-    # Create a simple dictionary-like object that can be used as a mock
-    class MockMaskingFile(dict):
-        def __init__(self):
-            super().__init__()
-            self.definitions = {
-                'global': {},
-                'environments': {}
-            }
-            self.save = MagicMock(return_value=True)
-
-        def update(self, new_definitions):
-            self.definitions.update(new_definitions)
-
-        def __getitem__(self, key):
-            if key == 'definitions':
-                return self.definitions
-            elif key == 'update':
-                return self.update
-            elif key == 'save':
-                return self.save
-            else:
-                return super().__getitem__(key)
-
-    return MockMaskingFile()

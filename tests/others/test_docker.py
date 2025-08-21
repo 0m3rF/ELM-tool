@@ -68,17 +68,14 @@ class DockerTestCase(unittest.TestCase):
         """Set up test fixtures before each test method."""
         pass
 
-    @pytest.mark.dependency(name="docker_installation")
     def test_docker_installation(self):
         """Test if Docker is properly installed."""
         self.assertTrue(is_docker_installed(), "Docker should be installed")
 
-    @pytest.mark.dependency(name="docker_daemon_running",depends=["test_docker_installation"])
     def test_docker_daemon_running(self):
         """Test if Docker daemon is running."""
         self.assertTrue(is_docker_daemon_running(), "Docker daemon should be running")
 
-    @pytest.mark.dependency(name="docker_availability",depends=["test_docker_installation","test_docker_daemon_running"])
     def test_docker_availability(self):
         """Test overall Docker availability."""
         docker_installed = is_docker_installed()
