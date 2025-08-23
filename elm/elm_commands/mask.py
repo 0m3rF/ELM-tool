@@ -1,6 +1,7 @@
 import click
 import pandas as pd
 from elm.core import masking as core_mask
+from elm.elm_utils.mask_algorithms import MASKING_ALGORITHMS
 
 # Keep these functions for backward compatibility with API
 def load_masking_definitions():

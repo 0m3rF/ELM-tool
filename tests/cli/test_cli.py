@@ -15,6 +15,50 @@ from elm.elm import cli
 from elm.core.types import OperationResult
 
 
+class TestCLIEntryPoint:
+    """Test the CLI entry point module (elm/cli.py)."""
+
+    def test_main_calls_cli(self):
+        """Test that main() calls the cli function."""
+        with patch('elm.cli.cli') as mock_cli:
+            from elm.cli import main
+            main()
+            mock_cli.assert_called_once()
+
+    def test_cli_import(self):
+        """Test that cli can be imported from elm.elm."""
+        from elm.cli import cli
+        assert cli is not None
+        assert callable(cli)
+
+    def test_main_function_exists(self):
+        """Test that main function exists and is callable."""
+        from elm.cli import main
+        assert main is not None
+        assert callable(main)
+
+    def test_cli_module_structure(self):
+        """Test the CLI module has the expected structure."""
+        import elm.cli
+
+        # Check that the module has main function
+        assert hasattr(elm.cli, 'main')
+        assert callable(elm.cli.main)
+
+        # Check that cli is imported
+        assert hasattr(elm.cli, 'cli')
+
+    def test_main_with_exception(self):
+        """Test main function handles exceptions gracefully."""
+        with patch('elm.cli.cli') as mock_cli:
+            mock_cli.side_effect = Exception("Test exception")
+
+            from elm.cli import main
+            # Should propagate the exception
+            with pytest.raises(Exception):
+                main()
+
+
 @pytest.fixture
 def runner():
     """Create a CLI runner for testing."""
