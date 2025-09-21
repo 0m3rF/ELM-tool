@@ -1,9 +1,9 @@
 import click
-import os
 import sys
 import subprocess
 import pandas as pd
 from elm.core import environment as core_env
+from elm.elm_utils.command_utils import AliasedGroup
 
 # Database-specific dependencies
 DB_PACKAGES = {
@@ -36,19 +36,6 @@ def ensure_db_driver_installed(db_type):
         except subprocess.CalledProcessError as e:
             print(f"Failed to install {package_name}: {str(e)}")
             print(f"Please install {package_name} manually using: pip install {package_name}")
-
-
-#Added for alias support at the end of this file.
-class AliasedGroup(click.Group):
-    def get_command(self, ctx, cmd_name):
-        try:
-            cmd_name = ALIASES[cmd_name].name
-        except KeyError:
-            pass
-        # cmd_name should be a string at this point, but add safety check
-        if cmd_name is None:
-                return None
-        return super().get_command(ctx, cmd_name)
 
 @click.group(cls=AliasedGroup)
 @click.help_option('-h', '--help')

@@ -9,17 +9,10 @@ and other configurable parameters.
 import click
 import json
 from elm.core import config as core_config
+from elm.elm_utils.command_utils import AliasedGroup
 
 
-class AliasedGroup(click.Group):
-    """Click group that supports command aliases."""
-    
-    def get_command(self, ctx, cmd_name):
-        try:
-            cmd_name = ALIASES[cmd_name].name
-        except KeyError:
-            pass
-        return super().get_command(ctx, cmd_name)
+
 
 
 @click.group(cls=AliasedGroup)

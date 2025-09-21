@@ -2,6 +2,7 @@ import click
 import pandas as pd
 from elm.core import masking as core_mask
 from elm.elm_utils.mask_algorithms import MASKING_ALGORITHMS
+from elm.elm_utils.command_utils import AliasedGroup
 
 # Keep these functions for backward compatibility with API
 def load_masking_definitions():
@@ -59,13 +60,7 @@ def apply_masking(data, environment=None):
 
     return masked_data
 
-class AliasedGroup(click.Group):
-    def get_command(self, ctx, cmd_name):
-        try:
-            cmd_name = ALIASES[cmd_name].name
-        except KeyError:
-            pass
-        return super().get_command(ctx, cmd_name)
+
 
 @click.group(cls=AliasedGroup)
 def mask():
