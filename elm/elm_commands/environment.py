@@ -7,7 +7,7 @@ from elm.core import environment as core_env
 
 # Database-specific dependencies
 DB_PACKAGES = {
-    "ORACLE": "cx_oracle",
+    "ORACLE": "oracledb",
     "MYSQL": "pymysql",
     "MSSQL": "pyodbc",
     "POSTGRES": "psycopg2-binary"
@@ -81,7 +81,7 @@ def environment():
 @click.option("-o", "--overwrite", is_flag=True, default= False, help="Overwrite existing environment definition")
 @click.option("-e", "--encrypt", is_flag=True, default= False, help="Encrypt sensitive environment information")
 @click.option("-k", "--encryption-key", required=False, help="The key to use for encryption. Required if --encrypt is used. Unused if no encrypt has given.")
-@click.option("-U", "--user-input", is_flag=True, default=False, help="Get input from user with prompts.")
+@click.option("-U", "--user-input", "-i", "--interactive", "--input", "--prompt", is_flag=True, default=False, help="Get input from user with prompts.")
 @click.help_option('--help')
 def create(name, host, port, user, password, service, type, overwrite, encrypt, encryption_key, user_input):
     """Create a new environment.

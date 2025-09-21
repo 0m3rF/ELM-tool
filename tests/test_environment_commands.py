@@ -76,7 +76,7 @@ class TestEnsureDbDriverInstalled:
              patch('builtins.print') as mock_print:
 
             # First call raises ImportError (not installed)
-            mock_import.side_effect = ImportError("No module named 'cx_oracle'")
+            mock_import.side_effect = ImportError("No module named 'oracledb'")
             # Installation fails
             mock_subprocess.side_effect = subprocess.CalledProcessError(1, "pip install")
 
@@ -84,11 +84,11 @@ class TestEnsureDbDriverInstalled:
 
             # Should try to install and handle failure
             mock_subprocess.assert_called_once_with([
-                sys.executable, "-m", "pip", "install", "cx_oracle"
+                sys.executable, "-m", "pip", "install", "oracledb"
             ])
-            mock_print.assert_any_call("Installing required database driver: cx_oracle")
-            mock_print.assert_any_call("Failed to install cx_oracle: Command 'pip install' returned non-zero exit status 1.")
-            mock_print.assert_any_call("Please install cx_oracle manually using: pip install cx_oracle")
+            mock_print.assert_any_call("Installing required database driver: oracledb")
+            mock_print.assert_any_call("Failed to install oracledb: Command 'pip install' returned non-zero exit status 1.")
+            mock_print.assert_any_call("Please install oracledb manually using: pip install oracledb")
             assert result is None
 
     def test_ensure_db_driver_installed_package_name_with_version(self):
@@ -134,7 +134,7 @@ class TestEnsureDbDriverInstalled:
     def test_db_packages_constants(self):
         """Test that DB_PACKAGES contains expected database types."""
         expected_packages = {
-            "ORACLE": "cx_oracle",
+            "ORACLE": "oracledb",
             "MYSQL": "pymysql",
             "MSSQL": "pyodbc",
             "POSTGRES": "psycopg2-binary"

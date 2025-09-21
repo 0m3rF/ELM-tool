@@ -189,7 +189,7 @@ def test_get_connection_url():
 
         # Test Oracle connection
         oracle_url = get_connection_url('test-oracle')
-        assert oracle_url == 'oracle+cx_oracle://system:secret@localhost:1521/XE'
+        assert oracle_url == 'oracle+oracledb://system:secret@localhost:1521/XE'
 
         # Test SQL Server connection
         mssql_url = get_connection_url('test-mssql')

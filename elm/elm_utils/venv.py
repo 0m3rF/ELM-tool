@@ -6,7 +6,7 @@ CORE_PACKAGES = ["click", "platformdirs", "configparser", "sqlalchemy", "pandas"
 
 # Database-specific dependencies
 DB_PACKAGES = {
-    "ORACLE": ["cx_oracle"],
+    "ORACLE": ["oracledb"],
     "MYSQL": ["pymysql"],
     "MSSQL": ["pyodbc"],
     "POSTGRES": ["psycopg2-binary"]

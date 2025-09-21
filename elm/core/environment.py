@@ -460,7 +460,7 @@ def get_connection_url(env_name: str, encryption_key: Optional[str] = None) -> s
 
     # Create connection URL based on database type
     if env_type == "ORACLE":
-        return f"oracle+cx_oracle://{user}:{password}@{host}:{port}/{service}"
+        return f"oracle+oracledb://{user}:{password}@{host}:{port}/{service}"
     elif env_type == "POSTGRES":
         return f"postgresql://{user}:{password}@{host}:{port}/{service}"
     elif env_type == "MYSQL":

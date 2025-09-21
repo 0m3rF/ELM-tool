@@ -101,7 +101,7 @@ def test_get_required_db_packages():
 
         # Verify the correct packages were returned
         assert 'psycopg2-binary' in packages
-        assert 'cx_oracle' in packages
+        assert 'oracledb' in packages
 
     # Test with no environments (should include all DB packages)
     with patch('os.path.exists') as mock_exists, \
