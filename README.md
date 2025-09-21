@@ -15,11 +15,13 @@ Extract, Load and Mask Tool for Database Operations
     - [Data Copy Operations](#data-copy-operations)
     - [Data Masking](#data-masking)
     - [Test Data Generation](#test-data-generation)
+    - [Configuration Management](#configuration-management)
   - [Python API](#python-api)
     - [Environment Management API](#environment-management-api)
     - [Data Copy API](#data-copy-api)
     - [Data Masking API](#data-masking-api)
     - [Data Generation API](#data-generation-api)
+    - [Configuration Management API](#configuration-management-api)
 - [Configuration](#configuration)
 - [Contributing](#contributing)
 - [License](#license)
@@ -40,6 +42,7 @@ The tool provides a unified interface for working with multiple database types, 
 
 - **Multi-database support**: Works with PostgreSQL, Oracle, MySQL, and MSSQL
 - **Environment management**: Create, update, and manage database connection profiles
+- **Configuration management**: Customize tool settings, directories, and behavior
 - **Data masking**: Protect sensitive information with various masking algorithms
 - **Test data generation**: Create realistic test data with customizable properties
 - **Cross-database operations**: Copy data between different database systems
@@ -56,7 +59,7 @@ pip install elm-tool
 Or install from source:
 
 ```bash
-git clone https://github.com/omerfarukkirli/elm-tool.git
+git clone https://github.com/0m3rF/elm-tool.git
 cd elm-tool
 pip install -e .
 ```
@@ -72,6 +75,13 @@ ELM Tool provides a command-line interface with several command groups:
 ```bash
 elm-tool --help
 ```
+
+**Available Commands:**
+- `config` - Configuration management commands
+- `environment` - Environment management commands
+- `copy` - Data copy commands for database operations
+- `mask` - Data masking commands for sensitive information
+- `generate` - Data generation commands for testing
 
 ### Environment Management
 
@@ -171,6 +181,45 @@ elm-tool generate data --columns "id,name,email" --output "test_data.csv" --num-
 # Write generated data directly to a database
 elm-tool generate data --environment dev-pg --table users --num-records 100 --write-to-db
 ```
+
+### Configuration Management
+
+Manage ELM Tool configuration settings including tool home directory, virtual environment settings, and other configurable parameters.
+
+```bash
+# Show current configuration and file paths
+elm-tool config show
+
+# Set ELM_TOOL_HOME directory
+elm-tool config set ELM_TOOL_HOME /path/to/elm/home
+
+# Set custom virtual environment name
+elm-tool config set VENV_NAME my_custom_venv
+
+# Get a specific configuration value
+elm-tool config get ELM_TOOL_HOME
+
+# Show file paths with existence indicators
+elm-tool config paths
+
+# Reset configuration to defaults
+elm-tool config reset
+
+# Using aliases
+elm-tool config info          # Same as 'show'
+elm-tool config dirs          # Same as 'paths'
+elm-tool config update KEY VALUE  # Same as 'set'
+```
+
+**Configurable Settings:**
+- `ELM_TOOL_HOME`: The home directory for ELM Tool files and configurations
+- `VENV_NAME`: The name of the virtual environment directory
+- `APP_NAME`: The application name used in various contexts
+
+**Configuration Storage:**
+- Configuration is stored in JSON format at `{ELM_TOOL_HOME}/config.json`
+- Settings persist across tool restarts
+- Automatic fallback to defaults if configuration file is corrupted
 
 ### Python API
 
@@ -353,11 +402,72 @@ result = elm.generate_and_save(
 print(f"Generated and wrote {result['record_count']} records to database")
 ```
 
+#### Configuration Management API
+
+```python
+# Get current configuration
+config = elm.get_config()
+print(f"ELM_TOOL_HOME: {config['ELM_TOOL_HOME']}")
+print(f"VENV_NAME: {config['VENV_NAME']}")
+
+# Set configuration values
+success = elm.set_config("ELM_TOOL_HOME", "/path/to/custom/home")
+print(f"Configuration updated: {success}")
+
+# Get detailed configuration information
+info = elm.get_config_info()
+print("Configuration values:")
+for key, value in info['config'].items():
+    print(f"  {key}: {value}")
+
+print("File paths:")
+for key, path in info['paths'].items():
+    print(f"  {key}: {path}")
+
+# Reset configuration to defaults
+success = elm.reset_config()
+print(f"Configuration reset: {success}")
+```
+
 ## Configuration
 
-ELM Tool stores environment configurations in `~/.elm/environments.ini` by default. Masking rules are stored in `~/.elm/masking.json`.
+ELM Tool provides comprehensive configuration management through the `config` command and API.
 
-You can encrypt sensitive environment information using the `--encrypt` flag when creating or updating environments, or by setting `encrypt=True` when using the API.
+### Configuration Files and Directories
+
+By default, ELM Tool stores its configuration and data files in the following locations:
+
+- **Configuration**: `{ELM_TOOL_HOME}/config.json` - Tool configuration settings
+- **Environments**: `{ELM_TOOL_HOME}/environments.ini` - Database connection profiles
+- **Masking Rules**: `{ELM_TOOL_HOME}/masking.json` - Data masking definitions
+- **Virtual Environment**: `{ELM_TOOL_HOME}/{VENV_NAME}` - Python virtual environment
+
+Where `{ELM_TOOL_HOME}` defaults to the user's configuration directory (e.g., `~/.config/ELMtool` on Linux, `%APPDATA%\ELMtool` on Windows).
+
+### Configurable Settings
+
+You can customize the following settings using the `config` command:
+
+- **ELM_TOOL_HOME**: Change the base directory for all ELM Tool files
+- **VENV_NAME**: Customize the virtual environment directory name
+- **APP_NAME**: Modify the application name used in various contexts
+
+### Configuration Management
+
+```bash
+# View current configuration
+elm-tool config show
+
+# Change the tool's home directory
+elm-tool config set ELM_TOOL_HOME /custom/path
+
+# Reset to defaults
+elm-tool config reset
+```
+
+### Security
+
+You can encrypt sensitive environment information using the `--encrypt` flag when creating or updating environments, or by setting `encrypt=True` when using the API. Encrypted environments require an encryption key for access.
 
 ## Contributing
 

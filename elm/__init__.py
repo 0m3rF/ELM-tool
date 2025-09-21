@@ -35,7 +35,13 @@ from elm.api import (
 
     # Data Generation
     generate_data,
-    generate_and_save
+    generate_and_save,
+
+    # Configuration Management
+    get_config,
+    set_config,
+    reset_config,
+    get_config_info
 )
 
 # For backward compatibility
