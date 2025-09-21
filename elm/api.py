@@ -16,6 +16,7 @@ from elm.core import environment as core_env
 from elm.core import copy as core_copy
 from elm.core import masking as core_mask
 from elm.core import generation as core_gen
+from elm.core import config as core_config
 from elm.core.types import OperationResult
 
 # Environment Management Functions
@@ -504,3 +505,53 @@ def generate_and_save(
         **kwargs
     )
     return result.to_dict()
+
+
+# Configuration Management Functions
+
+def get_config() -> Dict[str, Any]:
+    """
+    Get current configuration.
+
+    Returns:
+        Dictionary with current configuration values
+    """
+    result = core_config.get_config()
+    return result.data if result.success else {}
+
+
+def set_config(key: str, value: Any) -> bool:
+    """
+    Set a configuration value.
+
+    Args:
+        key: Configuration key
+        value: Configuration value
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    result = core_config.set_config(key, value)
+    return result.success
+
+
+def reset_config() -> bool:
+    """
+    Reset configuration to defaults.
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    result = core_config.reset_config()
+    return result.success
+
+
+def get_config_info() -> Dict[str, Any]:
+    """
+    Get configuration information including file paths.
+
+    Returns:
+        Dictionary with configuration and path information
+    """
+    result = core_config.show_config_info()
+    return result.data if result.success else {}
