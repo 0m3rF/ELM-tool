@@ -1,14 +1,6 @@
 import click
-import pandas as pd
 from elm.core import copy as core_copy
-
-class AliasedGroup(click.Group):
-    def get_command(self, ctx, cmd_name: str):
-        try:
-            cmd_name = ALIASES[cmd_name].name # type: ignore
-        except KeyError:
-            pass
-        return super().get_command(ctx, cmd_name)
+from elm.elm_utils.command_utils import AliasedGroup
 
 @click.group(cls=AliasedGroup)
 def copy():

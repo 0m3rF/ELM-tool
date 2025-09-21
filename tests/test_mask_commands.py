@@ -11,9 +11,9 @@ from elm.elm_commands.mask import (
     load_masking_definitions,
     save_masking_definitions,
     apply_masking,
-    AliasedGroup,
     mask
 )
+from elm.elm_utils.command_utils import AliasedGroup
 from elm.core.types import OperationResult
 
 
@@ -153,9 +153,15 @@ class TestAliasedGroup:
         # Create aliases dict
         aliases = {'a': mock_add}
 
-        group = AliasedGroup()
+        # Create a mock callback function with a module that has ALIASES
+        mock_callback = MagicMock()
+        mock_module = MagicMock()
+        mock_module.ALIASES = aliases
 
-        with patch('elm.elm_commands.mask.ALIASES', aliases):
+        group = AliasedGroup()
+        group.callback = mock_callback
+
+        with patch('inspect.getmodule', return_value=mock_module):
             with patch.object(click.Group, 'get_command') as mock_super:
                 mock_super.return_value = mock_add
 
@@ -169,14 +175,22 @@ class TestAliasedGroup:
         """Test getting command without alias."""
         group = AliasedGroup()
 
-        with patch('elm.elm_commands.mask.ALIASES', {}):
-            with patch.object(AliasedGroup, 'get_command', wraps=group.get_command) as mock_super:
+        # Create a mock callback function with a module that has empty ALIASES
+        mock_callback = MagicMock()
+        mock_module = MagicMock()
+        mock_module.ALIASES = {}
+
+        group.callback = mock_callback
+
+        with patch('inspect.getmodule', return_value=mock_module):
+            with patch.object(click.Group, 'get_command') as mock_super:
                 mock_super.return_value = None
 
-                group.get_command(None, 'unknown')
+                result = group.get_command(None, 'unknown')
 
                 # Should call super with the original command name
                 mock_super.assert_called_with(None, 'unknown')
+                assert result is None
 
 
 @pytest.fixture

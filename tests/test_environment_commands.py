@@ -11,10 +11,10 @@ from click.testing import CliRunner
 
 from elm.elm_commands.environment import (
     ensure_db_driver_installed,
-    AliasedGroup,
     DB_PACKAGES,
     environment
 )
+from elm.elm_utils.command_utils import AliasedGroup
 from elm.core.types import OperationResult
 
 
@@ -155,9 +155,15 @@ class TestEnvironmentAliasedGroup:
         # Create aliases dict
         aliases = {'new': mock_create}
 
-        group = AliasedGroup()
+        # Create a mock callback function with a module that has ALIASES
+        mock_callback = MagicMock()
+        mock_module = MagicMock()
+        mock_module.ALIASES = aliases
 
-        with patch('elm.elm_commands.environment.ALIASES', aliases):
+        group = AliasedGroup()
+        group.callback = mock_callback
+
+        with patch('inspect.getmodule', return_value=mock_module):
             with patch.object(click.Group, 'get_command') as mock_super:
                 mock_super.return_value = mock_create
 
@@ -169,9 +175,15 @@ class TestEnvironmentAliasedGroup:
 
     def test_aliased_group_get_command_without_alias(self):
         """Test getting command without alias."""
-        group = AliasedGroup()
+        # Create a mock callback function with a module that has empty ALIASES
+        mock_callback = MagicMock()
+        mock_module = MagicMock()
+        mock_module.ALIASES = {}
 
-        with patch('elm.elm_commands.environment.ALIASES', {}):
+        group = AliasedGroup()
+        group.callback = mock_callback
+
+        with patch('inspect.getmodule', return_value=mock_module):
             with patch.object(click.Group, 'get_command') as mock_super:
                 mock_super.return_value = None
 
@@ -185,11 +197,10 @@ class TestEnvironmentAliasedGroup:
         """Test getting command with None cmd_name."""
         group = AliasedGroup()
 
-        with patch('elm.elm_commands.environment.ALIASES', {}):
-            result = group.get_command(None, None)
+        result = group.get_command(None, None)
 
-            # Should return None for None cmd_name
-            assert result is None
+        # Should return None for None cmd_name
+        assert result is None
 
 
 @pytest.fixture
