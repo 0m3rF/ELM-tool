@@ -49,7 +49,7 @@ class TestGetConnectionUrl:
 
         url = db_utils.get_connection_url('test-env')
 
-        expected = 'oracle+cx_oracle://system:oracle@oraserver:1521/XE'
+        expected = 'oracle+oracledb://system:oracle@oraserver:1521/XE'
         assert url == expected
 
     @patch('elm.elm_utils.db_utils.config')

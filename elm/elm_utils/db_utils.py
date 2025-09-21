@@ -49,7 +49,7 @@ def get_connection_url(env_name, encryption_key=None):
     # Create connection URL based on database type
     if env_type == "ORACLE":
         # Oracle connection string format
-        return f"oracle+cx_oracle://{user}:{password}@{host}:{port}/{service}"
+        return f"oracle+oracledb://{user}:{password}@{host}:{port}/{service}"
     elif env_type == "POSTGRES":
         # PostgreSQL connection string format
         return f"postgresql://{user}:{password}@{host}:{port}/{service}"

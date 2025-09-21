@@ -28,14 +28,15 @@ dependencies = [
     "platformdirs>=3.0.0",
     "configparser>=5.0.0",
     "pyyaml>=6.0",
+    "Faker>=37.4.2"
 ]
 
 [project.optional-dependencies]
 postgres = ["psycopg2-binary>=2.9.1"]
-oracle = ["cx_oracle>=8.3.0"]
+oracle = ["oracledb>=1.0.0"]
 mysql = ["pymysql>=1.0.2"]
 mssql = ["pyodbc>=4.0.34"]
-all-db = ["psycopg2-binary>=2.9.1", "cx_oracle>=8.3.0", "pymysql>=1.0.2", "pyodbc>=4.0.34"]
+all-db = ["psycopg2-binary>=2.9.1", "oracledb>=1.0.0", "pymysql>=1.0.2", "pyodbc>=4.0.34"]
 
 [project.scripts]
 elm-tool = "elm.elm:cli"

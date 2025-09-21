@@ -447,7 +447,7 @@ class TestGetConnectionUrl:
 
         url = environment.get_connection_url('test-env')
 
-        expected = 'oracle+cx_oracle://system:oracle@oraserver:1521/XE'
+        expected = 'oracle+oracledb://system:oracle@oraserver:1521/XE'
         assert url == expected
 
     @patch('elm.core.environment.load_environment_config')
