@@ -216,3 +216,62 @@ class TestGenerationCore:
             assert 'name2' in record
             assert isinstance(record['name1'], str)
             assert isinstance(record['name2'], str)
+
+    def test_generate_data_with_environment_table_not_exists(self):
+        """Test generate data when table doesn't exist."""
+        with patch('elm.core.generation.get_connection_url', return_value='sqlite:///:memory:'):
+            with patch('elm.core.generation.check_table_exists', return_value=False):
+                result = generation.generate_data(
+                    num_records=5,
+                    environment='test_env',
+                    table='non_existent_table'
+                )
+
+                assert result.success is False
+                assert 'does not exist' in result.message
+
+    def test_generate_data_with_environment_no_columns_retrieved(self):
+        """Test generate data when no columns can be retrieved from table."""
+        with patch('elm.core.generation.get_connection_url', return_value='sqlite:///:memory:'):
+            with patch('elm.core.generation.check_table_exists', return_value=True):
+                with patch('elm.core.generation.get_table_columns', return_value=[]):
+                    result = generation.generate_data(
+                        num_records=5,
+                        environment='test_env',
+                        table='test_table'
+                    )
+
+                    assert result.success is False
+                    assert 'Could not retrieve columns' in result.message
+
+    def test_generate_data_with_environment_missing_columns(self):
+        """Test generate data with columns that don't exist in table."""
+        with patch('elm.core.generation.get_connection_url', return_value='sqlite:///:memory:'):
+            with patch('elm.core.generation.check_table_exists', return_value=True):
+                with patch('elm.core.generation.get_table_columns', return_value=['id', 'name']):
+                    result = generation.generate_data(
+                        num_records=5,
+                        columns=['id', 'name', 'non_existent_column'],
+                        environment='test_env',
+                        table='test_table'
+                    )
+
+                    assert result.success is False
+                    assert 'do not exist in table' in result.message
+
+    def test_generate_data_with_environment_success(self):
+        """Test generate data with environment and table successfully."""
+        with patch('elm.core.generation.get_connection_url', return_value='sqlite:///:memory:'):
+            with patch('elm.core.generation.check_table_exists', return_value=True):
+                with patch('elm.core.generation.get_table_columns', return_value=['id', 'name', 'email']):
+                    result = generation.generate_data(
+                        num_records=3,
+                        environment='test_env',
+                        table='test_table'
+                    )
+
+                    assert result.success is True
+                    assert len(result.data) == 3
+                    assert all('id' in record for record in result.data)
+                    assert all('name' in record for record in result.data)
+                    assert all('email' in record for record in result.data)
