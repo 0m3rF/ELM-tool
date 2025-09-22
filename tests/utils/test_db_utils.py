@@ -34,8 +34,8 @@ class TestGetConnectionUrl:
         assert url == expected
 
     @patch('elm.elm_utils.db_utils.config')
-    def test_get_connection_url_oracle(self, mock_config):
-        """Test getting connection URL for Oracle."""
+    def test_get_connection_url_oracle_service_name(self, mock_config):
+        """Test getting connection URL for Oracle with service_name (default)."""
         mock_config.sections.return_value = ['test-env']
         mock_config.__getitem__.return_value = {
             'type': 'ORACLE',
@@ -49,7 +49,47 @@ class TestGetConnectionUrl:
 
         url = db_utils.get_connection_url('test-env')
 
-        expected = 'oracle+oracledb://system:oracle@oraserver:1521/XE'
+        expected = 'oracle+oracledb://system:oracle@oraserver:1521?service_name=XE'
+        assert url == expected
+
+    @patch('elm.elm_utils.db_utils.config')
+    def test_get_connection_url_oracle_service_name_explicit(self, mock_config):
+        """Test getting connection URL for Oracle with explicit service_name."""
+        mock_config.sections.return_value = ['test-env']
+        mock_config.__getitem__.return_value = {
+            'type': 'ORACLE',
+            'host': 'oraserver',
+            'port': '1521',
+            'user': 'system',
+            'password': 'oracle',
+            'service': 'XE',
+            'connection_type': 'service_name',
+            'is_encrypted': 'False'
+        }
+
+        url = db_utils.get_connection_url('test-env')
+
+        expected = 'oracle+oracledb://system:oracle@oraserver:1521?service_name=XE'
+        assert url == expected
+
+    @patch('elm.elm_utils.db_utils.config')
+    def test_get_connection_url_oracle_sid(self, mock_config):
+        """Test getting connection URL for Oracle with SID."""
+        mock_config.sections.return_value = ['test-env']
+        mock_config.__getitem__.return_value = {
+            'type': 'ORACLE',
+            'host': 'oraserver',
+            'port': '1521',
+            'user': 'system',
+            'password': 'oracle',
+            'service': 'ORCL',
+            'connection_type': 'sid',
+            'is_encrypted': 'False'
+        }
+
+        url = db_utils.get_connection_url('test-env')
+
+        expected = 'oracle+oracledb://system:oracle@oraserver:1521/ORCL'
         assert url == expected
 
     @patch('elm.elm_utils.db_utils.config')

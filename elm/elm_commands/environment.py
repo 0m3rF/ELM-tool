@@ -68,9 +68,10 @@ def environment():
 @click.option("-o", "--overwrite", is_flag=True, default= False, help="Overwrite existing environment definition")
 @click.option("-e", "--encrypt", is_flag=True, default= False, help="Encrypt sensitive environment information")
 @click.option("-k", "--encryption-key", required=False, help="The key to use for encryption. Required if --encrypt is used. Unused if no encrypt has given.")
+@click.option("-c", "--connection-type", required=False, type=click.Choice(['service_name', 'sid'], case_sensitive=False), help="Oracle connection type: 'service_name' (default) or 'sid'. Only applies to Oracle databases.")
 @click.option("-U", "--user-input", "-i", "--interactive", "--input", "--prompt", is_flag=True, default=False, help="Get input from user with prompts.")
 @click.help_option('--help')
-def create(name, host, port, user, password, service, type, overwrite, encrypt, encryption_key, user_input):
+def create(name, host, port, user, password, service, type, overwrite, encrypt, encryption_key, connection_type, user_input):
     """Create a new environment.
 
     Examples:
@@ -78,8 +79,11 @@ def create(name, host, port, user, password, service, type, overwrite, encrypt, 
         Create a PostgreSQL environment:
           elm-tool environment create dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres
 
-        Create an Oracle environment:
-          elm-tool environment create prod-ora --host oraserver --port 1521 --user system --password oracle --service XE --type oracle
+        Create an Oracle environment with service name:
+          elm-tool environment create prod-ora --host oraserver --port 1521 --user system --password oracle --service XE --type oracle --connection-type service_name
+
+        Create an Oracle environment with SID:
+          elm-tool environment create prod-ora-sid --host oraserver --port 1521 --user system --password oracle --service ORCL --type oracle --connection-type sid
 
         Create an encrypted MySQL environment:
           elm-tool environment create secure-mysql --host dbserver --port 3306 --user root --password secret --service mysql --type mysql --encrypt --encryption-key mypassword
@@ -136,7 +140,8 @@ def create(name, host, port, user, password, service, type, overwrite, encrypt, 
         db_type=type,
         encrypt=encrypt,
         encryption_key=encryption_key,
-        overwrite=overwrite
+        overwrite=overwrite,
+        connection_type=connection_type
     )
 
     if result.success:
