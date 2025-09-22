@@ -236,6 +236,113 @@ class TestEnvironmentCLICommands:
         mock_create.assert_called_once()
 
     @patch('elm.elm_commands.environment.core_env.create_environment')
+    def test_create_environment_oracle_service_name(self, mock_create, runner):
+        """Test create Oracle environment with service_name."""
+        mock_create.return_value = OperationResult(
+            success=True,
+            message="Environment created successfully"
+        )
+
+        result = runner.invoke(environment, [
+            'create',
+            'oracle-env',
+            '--host', 'oraserver',
+            '--port', '1521',
+            '--user', 'system',
+            '--password', 'oracle',
+            '--service', 'XE',
+            '--type', 'ORACLE',
+            '--connection-type', 'service_name'
+        ])
+
+        assert result.exit_code == 0
+        assert "Environment created successfully" in result.output
+        mock_create.assert_called_once_with(
+            name='oracle-env',
+            host='oraserver',
+            port=1521,
+            user='system',
+            password='oracle',
+            service='XE',
+            db_type='ORACLE',
+            encrypt=False,
+            encryption_key=None,
+            overwrite=False,
+            connection_type='service_name'
+        )
+
+    @patch('elm.elm_commands.environment.core_env.create_environment')
+    def test_create_environment_oracle_sid(self, mock_create, runner):
+        """Test create Oracle environment with SID."""
+        mock_create.return_value = OperationResult(
+            success=True,
+            message="Environment created successfully"
+        )
+
+        result = runner.invoke(environment, [
+            'create',
+            'oracle-sid-env',
+            '--host', 'oraserver',
+            '--port', '1521',
+            '--user', 'system',
+            '--password', 'oracle',
+            '--service', 'ORCL',
+            '--type', 'ORACLE',
+            '--connection-type', 'sid'
+        ])
+
+        assert result.exit_code == 0
+        assert "Environment created successfully" in result.output
+        mock_create.assert_called_once_with(
+            name='oracle-sid-env',
+            host='oraserver',
+            port=1521,
+            user='system',
+            password='oracle',
+            service='ORCL',
+            db_type='ORACLE',
+            encrypt=False,
+            encryption_key=None,
+            overwrite=False,
+            connection_type='sid'
+        )
+
+    @patch('elm.elm_commands.environment.core_env.create_environment')
+    def test_create_environment_oracle_default_connection_type(self, mock_create, runner):
+        """Test create Oracle environment without specifying connection type (should default to service_name)."""
+        mock_create.return_value = OperationResult(
+            success=True,
+            message="Environment created successfully"
+        )
+
+        result = runner.invoke(environment, [
+            'create',
+            'oracle-default-env',
+            '--host', 'oraserver',
+            '--port', '1521',
+            '--user', 'system',
+            '--password', 'oracle',
+            '--service', 'XE',
+            '--type', 'ORACLE'
+        ])
+
+        assert result.exit_code == 0
+        assert "Environment created successfully" in result.output
+        mock_create.assert_called_once_with(
+            name='oracle-default-env',
+            host='oraserver',
+            port=1521,
+            user='system',
+            password='oracle',
+            service='XE',
+            db_type='ORACLE',
+            encrypt=False,
+            encryption_key=None,
+            overwrite=False,
+            connection_type=None
+        )
+
+    @patch('elm.elm_commands.environment.core_env.create_environment')
     def test_create_environment_failure_case(self, mock_create, runner):
         """Test create environment failure case."""
         mock_create.return_value = OperationResult(

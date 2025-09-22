@@ -102,8 +102,16 @@ class TestEnvironmentCore:
             # encrypt_data should be called for each field that needs encryption
             assert mock_encrypt.call_count == 6  # host, port, user, password, service, db_type
 
-    def test_create_environment_empty_name(self):
+    @patch('elm.core.environment.save_environment_config')
+    @patch('elm.core.environment.load_environment_config')
+    def test_create_environment_empty_name(self, mock_load, mock_save):
         """Test creating environment with empty name (currently allowed)."""
+        # Mock no existing environments
+        mock_config = MagicMock()
+        mock_config.sections.return_value = []
+        mock_load.return_value = mock_config
+        mock_save.return_value = True
+
         result = environment.create_environment(
             name="",  # Empty name is currently allowed
             host="localhost",
@@ -122,6 +130,104 @@ class TestEnvironmentCore:
             assert "Environment '' created successfully" in result.message
         else:
             assert "parsing errors" in result.message or "Environment name is required" in result.message
+
+    @patch('elm.core.environment.save_environment_config')
+    @patch('elm.core.environment.load_environment_config')
+    def test_create_environment_oracle_service_name(self, mock_load, mock_save):
+        """Test creating Oracle environment with service_name connection type."""
+        mock_config = MagicMock()
+        mock_config.sections.return_value = []
+        mock_load.return_value = mock_config
+        mock_save.return_value = True
+
+        result = environment.create_environment(
+            name="oracle-env",
+            host="oraserver",
+            port=1521,
+            user="system",
+            password="oracle",
+            service="XE",
+            db_type="ORACLE",
+            connection_type="service_name"
+        )
+
+        assert result.success is True
+        assert "Environment 'oracle-env' created successfully" in result.message
+        mock_save.assert_called_once()
+
+        # Verify the config was set up correctly
+        call_args = mock_config.add_section.call_args_list
+        assert len(call_args) == 1
+        assert call_args[0][0][0] == "oracle-env"
+
+    @patch('elm.core.environment.save_environment_config')
+    @patch('elm.core.environment.load_environment_config')
+    def test_create_environment_oracle_sid(self, mock_load, mock_save):
+        """Test creating Oracle environment with SID connection type."""
+        mock_config = MagicMock()
+        mock_config.sections.return_value = []
+        mock_load.return_value = mock_config
+        mock_save.return_value = True
+
+        result = environment.create_environment(
+            name="oracle-sid-env",
+            host="oraserver",
+            port=1521,
+            user="system",
+            password="oracle",
+            service="ORCL",
+            db_type="ORACLE",
+            connection_type="sid"
+        )
+
+        assert result.success is True
+        assert "Environment 'oracle-sid-env' created successfully" in result.message
+        mock_save.assert_called_once()
+
+    @patch('elm.core.environment.load_environment_config')
+    def test_create_environment_oracle_invalid_connection_type(self, mock_load):
+        """Test creating Oracle environment with invalid connection type."""
+        mock_config = MagicMock()
+        mock_config.sections.return_value = []
+        mock_load.return_value = mock_config
+
+        result = environment.create_environment(
+            name="oracle-env",
+            host="oraserver",
+            port=1521,
+            user="system",
+            password="oracle",
+            service="XE",
+            db_type="ORACLE",
+            connection_type="invalid_type"
+        )
+
+        assert result.success is False
+        assert "Oracle connection_type must be 'service_name' or 'sid'" in result.message
+
+    @patch('elm.core.environment.save_environment_config')
+    @patch('elm.core.environment.load_environment_config')
+    def test_create_environment_oracle_default_connection_type(self, mock_load, mock_save):
+        """Test creating Oracle environment with default connection type (service_name)."""
+        mock_config = MagicMock()
+        mock_config.sections.return_value = []
+        mock_load.return_value = mock_config
+        mock_save.return_value = True
+
+        result = environment.create_environment(
+            name="oracle-default-env",
+            host="oraserver",
+            port=1521,
+            user="system",
+            password="oracle",
+            service="XE",
+            db_type="ORACLE"
+            # No connection_type specified - should default to service_name
+        )
+
+        assert result.success is True
+        assert "Environment 'oracle-default-env' created successfully" in result.message
+        mock_save.assert_called_once()
 
     @patch('elm.core.environment.load_environment_config')
     def test_list_environments_success(self, mock_load):
@@ -430,8 +536,8 @@ class TestGetConnectionUrl:
         assert url == expected
 
     @patch('elm.core.environment.load_environment_config')
-    def test_get_connection_url_oracle(self, mock_load):
-        """Test getting connection URL for Oracle."""
+    def test_get_connection_url_oracle_service_name_default(self, mock_load):
+        """Test getting connection URL for Oracle with service_name (default)."""
         mock_config = MagicMock()
         mock_config.sections.return_value = ['test-env']
         mock_config.__getitem__.return_value = {
@@ -447,7 +553,51 @@ class TestGetConnectionUrl:
 
         url = environment.get_connection_url('test-env')
 
-        expected = 'oracle+oracledb://system:oracle@oraserver:1521/XE'
+        expected = 'oracle+oracledb://system:oracle@oraserver:1521?service_name=XE'
+        assert url == expected
+
+    @patch('elm.core.environment.load_environment_config')
+    def test_get_connection_url_oracle_service_name_explicit(self, mock_load):
+        """Test getting connection URL for Oracle with explicit service_name."""
+        mock_config = MagicMock()
+        mock_config.sections.return_value = ['test-env']
+        mock_config.__getitem__.return_value = {
+            'type': 'ORACLE',
+            'host': 'oraserver',
+            'port': '1521',
+            'user': 'system',
+            'password': 'oracle',
+            'service': 'XE',
+            'connection_type': 'service_name',
+            'is_encrypted': 'False'
+        }
+        mock_load.return_value = mock_config
+
+        url = environment.get_connection_url('test-env')
+
+        expected = 'oracle+oracledb://system:oracle@oraserver:1521?service_name=XE'
+        assert url == expected
+
+    @patch('elm.core.environment.load_environment_config')
+    def test_get_connection_url_oracle_sid(self, mock_load):
+        """Test getting connection URL for Oracle with SID."""
+        mock_config = MagicMock()
+        mock_config.sections.return_value = ['test-env']
+        mock_config.__getitem__.return_value = {
+            'type': 'ORACLE',
+            'host': 'oraserver',
+            'port': '1521',
+            'user': 'system',
+            'password': 'oracle',
+            'service': 'ORCL',
+            'connection_type': 'sid',
+            'is_encrypted': 'False'
+        }
+        mock_load.return_value = mock_config
+
+        url = environment.get_connection_url('test-env')
+
+        expected = 'oracle+oracledb://system:oracle@oraserver:1521/ORCL'
         assert url == expected
 
     @patch('elm.core.environment.load_environment_config')

@@ -187,9 +187,9 @@ def test_get_connection_url():
         mysql_url = get_connection_url('test-mysql')
         assert mysql_url == 'mysql+pymysql://root:secret@localhost:3306/mydb'
 
-        # Test Oracle connection
+        # Test Oracle connection (defaults to service_name)
         oracle_url = get_connection_url('test-oracle')
-        assert oracle_url == 'oracle+oracledb://system:secret@localhost:1521/XE'
+        assert oracle_url == 'oracle+oracledb://system:secret@localhost:1521?service_name=XE'
 
         # Test SQL Server connection
         mssql_url = get_connection_url('test-mssql')

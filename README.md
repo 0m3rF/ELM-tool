@@ -91,8 +91,11 @@ Environments are database connection profiles that store connection details.
 # Create a new PostgreSQL environment
 elm-tool environment create dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres
 
-# Create an Oracle environment
-elm-tool environment create prod-ora --host oraserver --port 1521 --user system --password oracle --service XE --type oracle
+# Create an Oracle environment with service name (default)
+elm-tool environment create prod-ora --host oraserver --port 1521 --user system --password oracle --service XE --type oracle --connection-type service_name
+
+# Create an Oracle environment with SID
+elm-tool environment create prod-ora-sid --host oraserver --port 1521 --user system --password oracle --service ORCL --type oracle --connection-type sid
 
 # Create an encrypted MySQL environment
 elm-tool environment create secure-mysql --host dbserver --port 3306 --user root --password secret --service mysql --type mysql --encrypt --encryption-key mypassword
@@ -260,6 +263,30 @@ elm.create_environment(
     password="password",
     service="postgres",
     db_type="postgres"
+)
+
+# Create an Oracle environment with service name
+elm.create_environment(
+    name="oracle-env",
+    host="oraserver",
+    port=1521,
+    user="system",
+    password="oracle",
+    service="XE",
+    db_type="oracle",
+    connection_type="service_name"
+)
+
+# Create an Oracle environment with SID
+elm.create_environment(
+    name="oracle-sid-env",
+    host="oraserver",
+    port=1521,
+    user="system",
+    password="oracle",
+    service="ORCL",
+    db_type="oracle",
+    connection_type="sid"
 )
 
 # Create an encrypted environment

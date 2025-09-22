@@ -6,7 +6,7 @@ from elm.elm_utils.command_utils import AliasedGroup
 def ensure_env_dir():
     """Ensure the environment directory exists."""
     if not os.path.exists(variables.ENVS_FILE):
-        os.makedirs(variables.ENVS_FILE, exist_ok=True)
+        os.makedirs(os.path.dirname(variables.ENVS_FILE), exist_ok=True)
 
 @click.group(cls=AliasedGroup)
 @click.help_option('-h', '--help')

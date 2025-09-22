@@ -30,22 +30,24 @@ def create_environment(
     db_type: str,
     encrypt: bool = False,
     encryption_key: Optional[str] = None,
-    overwrite: bool = False
+    overwrite: bool = False,
+    connection_type: Optional[str] = None
 ) -> OperationResult:
     """
     Create a new database environment.
-    
+
     Args:
         name: Environment name
         host: Database host
         port: Database port
         user: Database username
         password: Database password
-        service: Database service name
+        service: Database service name (or SID for Oracle)
         db_type: Database type (ORACLE, POSTGRES, MYSQL, MSSQL)
         encrypt: Whether to encrypt the environment
         encryption_key: Encryption key (required if encrypt=True)
         overwrite: Whether to overwrite if environment already exists
+        connection_type: Oracle connection type ('service_name' or 'sid'). Defaults to 'service_name'
     
     Returns:
         OperationResult with success status and message
@@ -88,6 +90,15 @@ def create_environment(
             "service": service,
             "type": db_type_enum.value
         }
+
+        # Add Oracle-specific connection type if specified
+        if db_type_enum == DatabaseType.ORACLE and connection_type:
+            if connection_type.lower() not in ['service_name', 'sid']:
+                raise ValidationError("Oracle connection_type must be 'service_name' or 'sid'")
+            env_data["connection_type"] = connection_type.lower()
+        elif db_type_enum == DatabaseType.ORACLE:
+            # Default to service_name for Oracle if not specified
+            env_data["connection_type"] = "service_name"
         
         # Handle encryption
         if encrypt:
@@ -447,6 +458,7 @@ def get_connection_url(env_name: str, encryption_key: Optional[str] = None) -> s
             user = decrypted_env["user"]
             password = decrypted_env["password"]
             service = decrypted_env["service"]
+            connection_type = decrypted_env.get("connection_type", "service_name")
         except Exception as e:
             raise EncryptionError(f"Failed to decrypt environment: {str(e)}. Check your encryption key.")
     else:
@@ -457,10 +469,17 @@ def get_connection_url(env_name: str, encryption_key: Optional[str] = None) -> s
         user = config[env_name]["user"]
         password = config[env_name]["password"]
         service = config[env_name]["service"]
+        connection_type = config[env_name].get("connection_type", "service_name")
 
     # Create connection URL based on database type
     if env_type == "ORACLE":
-        return f"oracle+oracledb://{user}:{password}@{host}:{port}/{service}"
+        # Handle Oracle connection types: SID vs service_name
+        if connection_type == "sid":
+            # For SID connections, use the format: oracle+oracledb://user:password@host:port/sid
+            return f"oracle+oracledb://{user}:{password}@{host}:{port}/{service}"
+        else:
+            # For service_name connections, use the format: oracle+oracledb://user:password@host:port?service_name=service
+            return f"oracle+oracledb://{user}:{password}@{host}:{port}?service_name={service}"
     elif env_type == "POSTGRES":
         return f"postgresql://{user}:{password}@{host}:{port}/{service}"
     elif env_type == "MYSQL":

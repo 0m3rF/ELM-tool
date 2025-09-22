@@ -35,6 +35,7 @@ def get_connection_url(env_name, encryption_key=None):
             user = decrypted_env["user"]
             password = decrypted_env["password"]
             service = decrypted_env["service"]
+            connection_type = decrypted_env.get("connection_type", "service_name")
         except Exception as e:
             raise ValueError(f"Failed to decrypt environment: {str(e)}. Check your encryption key.")
     else:
@@ -45,11 +46,17 @@ def get_connection_url(env_name, encryption_key=None):
         user = config[env_name]["user"]
         password = config[env_name]["password"]
         service = config[env_name]["service"]
+        connection_type = config[env_name].get("connection_type", "service_name")
 
     # Create connection URL based on database type
     if env_type == "ORACLE":
-        # Oracle connection string format
-        return f"oracle+oracledb://{user}:{password}@{host}:{port}/{service}"
+        # Handle Oracle connection types: SID vs service_name
+        if connection_type == "sid":
+            # For SID connections, use the format: oracle+oracledb://user:password@host:port/sid
+            return f"oracle+oracledb://{user}:{password}@{host}:{port}/{service}"
+        else:
+            # For service_name connections, use the format: oracle+oracledb://user:password@host:port?service_name=service
+            return f"oracle+oracledb://{user}:{password}@{host}:{port}?service_name={service}"
     elif env_type == "POSTGRES":
         # PostgreSQL connection string format
         return f"postgresql://{user}:{password}@{host}:{port}/{service}"

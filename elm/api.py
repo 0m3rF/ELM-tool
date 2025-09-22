@@ -31,7 +31,8 @@ def create_environment(
     db_type: str,
     encrypt: bool = False,
     encryption_key: Optional[str] = None,
-    overwrite: bool = False
+    overwrite: bool = False,
+    connection_type: Optional[str] = None
 ) -> bool:
     """
     Create a new database environment.
@@ -42,11 +43,12 @@ def create_environment(
         port: Database port
         user: Database username
         password: Database password
-        service: Database service name
+        service: Database service name (or SID for Oracle)
         db_type: Database type (ORACLE, MYSQL, MSSQL, POSTGRES)
         encrypt: Whether to encrypt the environment
         encryption_key: Encryption key (required if encrypt=True)
         overwrite: Whether to overwrite if environment already exists
+        connection_type: Oracle connection type ('service_name' or 'sid'). Defaults to 'service_name'
 
     Returns:
         bool: True if successful, False otherwise
@@ -61,7 +63,8 @@ def create_environment(
         db_type=db_type,
         encrypt=encrypt,
         encryption_key=encryption_key,
-        overwrite=overwrite
+        overwrite=overwrite,
+        connection_type=connection_type
     )
     return result.success
 
