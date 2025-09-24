@@ -20,6 +20,49 @@ from elm.core.utils import (
 from elm.elm_utils import encryption
 
 
+def _initialize_oracle_client():
+    """Initialize Oracle client to handle thin mode issues."""
+    try:
+        import oracledb
+        # Try to initialize Oracle client if not already done
+        if not hasattr(oracledb, '_client_initialized'):
+            try:
+                oracledb.init_oracle_client()
+                oracledb._client_initialized = True
+            except Exception:
+                # If initialization fails, continue with thin mode
+                pass
+    except ImportError:
+        # oracledb not installed
+        pass
+
+
+def _handle_oracle_connection_error(connection_url, original_error):
+    """Handle Oracle connection errors by trying to initialize client."""
+    error_str = str(original_error).lower()
+
+    # Check for thin mode password verifier errors
+    if any(keyword in error_str for keyword in [
+        'password verifier type', 'dpy-3015', 'not supported by python-oracledb in thin mode',
+        'thin mode', 'verifier'
+    ]):
+        try:
+            # Try to initialize Oracle client and retry connection
+            _initialize_oracle_client()
+
+            # Retry the connection with thick mode
+            engine = create_engine(connection_url)
+            with engine.connect() as connection:
+                result = connection.execute(text("SELECT 1"))
+                result.fetchall()
+            return True
+        except Exception:
+            # If thick mode also fails, raise the original error
+            pass
+
+    return False
+
+
 def create_environment(
     name: str,
     host: str,
@@ -27,11 +70,12 @@ def create_environment(
     user: str,
     password: str,
     service: str,
-    db_type: str,
+    database: str = None,
     encrypt: bool = False,
     encryption_key: Optional[str] = None,
     overwrite: bool = False,
-    connection_type: Optional[str] = None
+    connection_type: Optional[str] = None,
+    db_type: str = None  # Deprecated: use 'database' parameter instead
 ) -> OperationResult:
     """
     Create a new database environment.
@@ -43,28 +87,35 @@ def create_environment(
         user: Database username
         password: Database password
         service: Database service name (or SID for Oracle)
-        db_type: Database type (ORACLE, POSTGRES, MYSQL, MSSQL)
+        database: Database type (ORACLE, POSTGRES, MYSQL, MSSQL)
         encrypt: Whether to encrypt the environment
         encryption_key: Encryption key (required if encrypt=True)
         overwrite: Whether to overwrite if environment already exists
         connection_type: Oracle connection type ('service_name' or 'sid'). Defaults to 'service_name'
+        db_type: Deprecated parameter, use 'database' instead
     
     Returns:
         OperationResult with success status and message
     """
     try:
+        # Handle backward compatibility for db_type parameter
+        if database is None and db_type is not None:
+            database = db_type
+        elif database is None and db_type is None:
+            raise ValidationError("Either 'database' or 'db_type' parameter must be provided")
+
         # Validate inputs
         validate_required_params(
-            {'name': name, 'host': host, 'port': port, 'user': user, 
-             'password': password, 'service': service, 'db_type': db_type},
-            ['name', 'host', 'port', 'user', 'password', 'service', 'db_type']
+            {'name': name, 'host': host, 'port': port, 'user': user,
+             'password': password, 'service': service, 'database': database},
+            ['name', 'host', 'port', 'user', 'password', 'service', 'database']
         )
-        
+
         if name == "*":
             raise ValidationError("Cannot use '*' as environment name")
-        
+
         # Validate database type
-        db_type_enum = validate_database_type(db_type)
+        db_type_enum = validate_database_type(database)
         
         # Validate encryption requirements
         if encrypt and not encryption_key:
@@ -204,9 +255,10 @@ def update_environment(
     user: Optional[str] = None,
     password: Optional[str] = None,
     service: Optional[str] = None,
-    db_type: Optional[str] = None,
+    database: Optional[str] = None,
     encrypt: Optional[bool] = None,
-    encryption_key: Optional[str] = None
+    encryption_key: Optional[str] = None,
+    db_type: Optional[str] = None  # Deprecated: use 'database' parameter instead
 ) -> OperationResult:
     """
     Update an existing environment.
@@ -218,20 +270,25 @@ def update_environment(
         user: New database username
         password: New database password
         service: New database service name
-        db_type: New database type
+        database: New database type
         encrypt: Whether to encrypt the environment
         encryption_key: Encryption key (required if encrypt=True)
+        db_type: Deprecated parameter, use 'database' instead
 
     Returns:
         OperationResult with success status and message
     """
     try:
+        # Handle backward compatibility for db_type parameter
+        if database is None and db_type is not None:
+            database = db_type
+
         validate_required_params({'name': name}, ['name'])
 
         # Check if any field is provided to update
         update_fields = {k: v for k, v in {
             'host': host, 'port': port, 'user': user, 'password': password,
-            'service': service, 'db_type': db_type
+            'service': service, 'database': database
         }.items() if v is not None}
 
         if not update_fields and encrypt is None:
@@ -251,8 +308,8 @@ def update_environment(
         was_encrypted = config[name].get('is_encrypted', 'False') == 'True'
 
         # Validate database type if provided
-        if 'db_type' in update_fields:
-            update_fields['db_type'] = validate_database_type(update_fields['db_type']).value
+        if 'database' in update_fields:
+            update_fields['database'] = validate_database_type(update_fields['database']).value
 
         # Handle different encryption scenarios
         if was_encrypted:
@@ -267,7 +324,7 @@ def update_environment(
                 for field, value in update_fields.items():
                     if field == 'port':
                         decrypted_env[field] = str(value)
-                    elif field == 'db_type':
+                    elif field == 'database':
                         decrypted_env['type'] = value
                     else:
                         decrypted_env[field] = value
@@ -285,7 +342,7 @@ def update_environment(
             for field, value in update_fields.items():
                 if field == 'port':
                     config[name][field] = str(value)
-                elif field == 'db_type':
+                elif field == 'database':
                     config[name]['type'] = value
                 else:
                     config[name][field] = value
@@ -358,10 +415,23 @@ def test_environment(name: str, encryption_key: Optional[str] = None) -> Operati
 
         connection_url = get_connection_url(name, encryption_key)
 
-        engine = create_engine(connection_url)
-        with engine.connect() as connection:
-            result = connection.execute(text("SELECT 1"))
-            result.fetchall()
+        try:
+            engine = create_engine(connection_url)
+            with engine.connect() as connection:
+                result = connection.execute(text("SELECT 1"))
+                result.fetchall()
+        except Exception as e:
+            # Check if this is an Oracle connection and try to handle thin mode errors
+            if 'oracle' in connection_url.lower():
+                if _handle_oracle_connection_error(connection_url, e):
+                    # Connection succeeded after Oracle client initialization
+                    pass
+                else:
+                    # Re-raise the original error
+                    raise e
+            else:
+                # Not an Oracle connection, re-raise the error
+                raise e
 
         return create_success_result(f"Successfully connected to environment '{name}'")
 
@@ -393,27 +463,60 @@ def execute_sql(
 
         connection_url = get_connection_url(environment, encryption_key)
 
-        engine = create_engine(connection_url)
-        with engine.connect() as connection:
-            if params:
-                result = connection.execute(text(query), params)
-            else:
-                result = connection.execute(text(query))
-
-            if result.returns_rows:
-                import pandas as pd
-                df = pd.DataFrame(result.fetchall())
-                if not df.empty:
-                    df.columns = result.keys()
-                    return create_success_result(
-                        "Query executed successfully",
-                        data=df.to_dict('records'),
-                        record_count=len(df)
-                    )
+        try:
+            engine = create_engine(connection_url)
+            with engine.connect() as connection:
+                if params:
+                    result = connection.execute(text(query), params)
                 else:
-                    return create_success_result("Query executed successfully. No rows returned.")
+                    result = connection.execute(text(query))
+
+                if result.returns_rows:
+                    import pandas as pd
+                    df = pd.DataFrame(result.fetchall())
+                    if not df.empty:
+                        df.columns = result.keys()
+                        return create_success_result(
+                            "Query executed successfully",
+                            data=df.to_dict('records'),
+                            record_count=len(df)
+                        )
+                    else:
+                        return create_success_result("Query executed successfully. No rows returned.")
+                else:
+                    return create_success_result("Query executed successfully. No result set.")
+        except Exception as e:
+            # Check if this is an Oracle connection and try to handle thin mode errors
+            if 'oracle' in connection_url.lower():
+                if _handle_oracle_connection_error(connection_url, e):
+                    # Retry the query after Oracle client initialization
+                    engine = create_engine(connection_url)
+                    with engine.connect() as connection:
+                        if params:
+                            result = connection.execute(text(query), params)
+                        else:
+                            result = connection.execute(text(query))
+
+                        if result.returns_rows:
+                            import pandas as pd
+                            df = pd.DataFrame(result.fetchall())
+                            if not df.empty:
+                                df.columns = result.keys()
+                                return create_success_result(
+                                    "Query executed successfully",
+                                    data=df.to_dict('records'),
+                                    record_count=len(df)
+                                )
+                            else:
+                                return create_success_result("Query executed successfully. No rows returned.")
+                        else:
+                            return create_success_result("Query executed successfully. No result set.")
+                else:
+                    # Re-raise the original error
+                    raise e
             else:
-                return create_success_result("Query executed successfully. No result set.")
+                # Not an Oracle connection, re-raise the error
+                raise e
 
     except Exception as e:
         return handle_exception(e, "SQL execution")

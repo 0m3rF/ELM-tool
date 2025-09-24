@@ -186,7 +186,7 @@ class TestEnvironmentCLI:
             '--user', 'postgres',
             '--password', 'secret',
             '--service', 'mydb',
-            '--type', 'postgres'
+            '--database', 'postgres'
         ])
 
         assert result.exit_code == 0
@@ -558,7 +558,7 @@ class TestCLIErrorHandling:
             '--user', 'postgres',
             '--password', 'secret',
             '--service', 'mydb',
-            '--type', 'postgres'
+            '--database', 'postgres'
         ])
 
         assert result.exit_code != 0

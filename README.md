@@ -89,16 +89,16 @@ Environments are database connection profiles that store connection details.
 
 ```bash
 # Create a new PostgreSQL environment
-elm-tool environment create dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres
+elm-tool environment create dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --database postgres
 
 # Create an Oracle environment with service name (default)
-elm-tool environment create prod-ora --host oraserver --port 1521 --user system --password oracle --service XE --type oracle --connection-type service_name
+elm-tool environment create prod-ora --host oraserver --port 1521 --user system --password oracle --service XE --database oracle --connection-type service_name
 
 # Create an Oracle environment with SID
-elm-tool environment create prod-ora-sid --host oraserver --port 1521 --user system --password oracle --service ORCL --type oracle --connection-type sid
+elm-tool environment create prod-ora-sid --host oraserver --port 1521 --user system --password oracle --service ORCL --database oracle --connection-type sid
 
 # Create an encrypted MySQL environment
-elm-tool environment create secure-mysql --host dbserver --port 3306 --user root --password secret --service mysql --type mysql --encrypt --encryption-key mypassword
+elm-tool environment create secure-mysql --host dbserver --port 3306 --user root --password secret --service mysql --database mysql --encrypt --encryption-key mypassword
 
 # List all environments
 elm-tool environment list
@@ -239,7 +239,7 @@ elm.create_environment(
     user="postgres",
     password="password",
     service="postgres",
-    db_type="postgres"
+    database="postgres"
 )
 
 # Test the connection
@@ -262,7 +262,7 @@ elm.create_environment(
     user="postgres",
     password="password",
     service="postgres",
-    db_type="postgres"
+    database="postgres"
 )
 
 # Create an Oracle environment with service name
@@ -273,7 +273,7 @@ elm.create_environment(
     user="system",
     password="oracle",
     service="XE",
-    db_type="oracle",
+    database="oracle",
     connection_type="service_name"
 )
 
@@ -285,7 +285,7 @@ elm.create_environment(
     user="system",
     password="oracle",
     service="ORCL",
-    db_type="oracle",
+    database="oracle",
     connection_type="sid"
 )
 
@@ -297,7 +297,7 @@ elm.create_environment(
     user="root",
     password="secret",
     service="mysql",
-    db_type="mysql",
+    database="mysql",
     encrypt=True,
     encryption_key="mypassword"
 )

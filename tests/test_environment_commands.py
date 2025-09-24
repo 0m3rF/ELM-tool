@@ -228,7 +228,7 @@ class TestEnvironmentCLICommands:
             '--user', 'postgres',
             '--password', 'password',
             '--service', 'mydb',
-            '--type', 'POSTGRES'
+            '--database', 'POSTGRES'
         ])
 
         assert result.exit_code == 0
@@ -251,7 +251,7 @@ class TestEnvironmentCLICommands:
             '--user', 'system',
             '--password', 'oracle',
             '--service', 'XE',
-            '--type', 'ORACLE',
+            '--database', 'ORACLE',
             '--connection-type', 'service_name'
         ])
 
@@ -287,7 +287,7 @@ class TestEnvironmentCLICommands:
             '--user', 'system',
             '--password', 'oracle',
             '--service', 'ORCL',
-            '--type', 'ORACLE',
+            '--database', 'ORACLE',
             '--connection-type', 'sid'
         ])
 
@@ -323,7 +323,7 @@ class TestEnvironmentCLICommands:
             '--user', 'system',
             '--password', 'oracle',
             '--service', 'XE',
-            '--type', 'ORACLE'
+            '--database', 'ORACLE'
         ])
 
         assert result.exit_code == 0
@@ -358,7 +358,7 @@ class TestEnvironmentCLICommands:
             '--user', 'postgres',
             '--password', 'password',
             '--service', 'mydb',
-            '--type', 'POSTGRES'
+            '--database', 'POSTGRES'
         ])
 
         assert result.exit_code != 0
@@ -606,7 +606,7 @@ class TestEnvironmentCLIEdgeCases:
             '--user', 'postgres',
             '--password', 'password',
             '--service', 'mydb',
-            '--type', 'POSTGRES'
+            '--database', 'POSTGRES'
         ])
 
         assert result.exit_code != 0

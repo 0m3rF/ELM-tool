@@ -64,32 +64,32 @@ def environment():
 @click.option("-u", "--user", required=False, help="User of the environment")
 @click.option("-P", "--password", required=False, help="Password of the environment")
 @click.option("-s", "--service", required=False, help="Service of the environment")
-@click.option("-t", "--type", required=False, type=click.Choice(['ORACLE', 'POSTGRES', 'MYSQL', 'MSSQL'], case_sensitive=False),  help="Type of the environment")
+@click.option("-d", "--database", required=False, type=click.Choice(['ORACLE', 'POSTGRES', 'MYSQL', 'MSSQL'], case_sensitive=False),  help="Database type of the environment")
 @click.option("-o", "--overwrite", is_flag=True, default= False, help="Overwrite existing environment definition")
 @click.option("-e", "--encrypt", is_flag=True, default= False, help="Encrypt sensitive environment information")
 @click.option("-k", "--encryption-key", required=False, help="The key to use for encryption. Required if --encrypt is used. Unused if no encrypt has given.")
 @click.option("-c", "--connection-type", required=False, type=click.Choice(['service_name', 'sid'], case_sensitive=False), help="Oracle connection type: 'service_name' (default) or 'sid'. Only applies to Oracle databases.")
 @click.option("-U", "--user-input", "-i", "--interactive", "--input", "--prompt", is_flag=True, default=False, help="Get input from user with prompts.")
 @click.help_option('--help')
-def create(name, host, port, user, password, service, type, overwrite, encrypt, encryption_key, connection_type, user_input):
+def create(name, host, port, user, password, service, database, overwrite, encrypt, encryption_key, connection_type, user_input):
     """Create a new environment.
 
     Examples:
 
         Create a PostgreSQL environment:
-          elm-tool environment create dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres
+          elm-tool environment create dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --database postgres
 
         Create an Oracle environment with service name:
-          elm-tool environment create prod-ora --host oraserver --port 1521 --user system --password oracle --service XE --type oracle --connection-type service_name
+          elm-tool environment create prod-ora --host oraserver --port 1521 --user system --password oracle --service XE --database oracle --connection-type service_name
 
         Create an Oracle environment with SID:
-          elm-tool environment create prod-ora-sid --host oraserver --port 1521 --user system --password oracle --service ORCL --type oracle --connection-type sid
+          elm-tool environment create prod-ora-sid --host oraserver --port 1521 --user system --password oracle --service ORCL --database oracle --connection-type sid
 
         Create an encrypted MySQL environment:
-          elm-tool environment create secure-mysql --host dbserver --port 3306 --user root --password secret --service mysql --type mysql --encrypt --encryption-key mypassword
+          elm-tool environment create secure-mysql --host dbserver --port 3306 --user root --password secret --service mysql --database mysql --encrypt --encryption-key mypassword
 
         Create an environment and overwrite if it already exists:
-          elm-tool environment create dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --type postgres --overwrite
+          elm-tool environment create dev-pg --host localhost --port 5432 --user postgres --password password --service postgres --database postgres --overwrite
 
         Create an environment with user input prompts:
           elm-tool environment create dev-pg --user-input
@@ -107,22 +107,24 @@ def create(name, host, port, user, password, service, type, overwrite, encrypt, 
             password = click.prompt("Password", type=str, hide_input=True, confirmation_prompt=True, prompt_suffix=": ")
         if not service:
             service = click.prompt("Service", type=str)
-        if not type:
-            type = click.prompt("Type", type=click.Choice(['ORACLE', 'POSTGRES', 'MYSQL', 'MSSQL'], case_sensitive=False))
+        if not database:
+            database = click.prompt("Database", type=click.Choice(['ORACLE', 'POSTGRES', 'MYSQL', 'MSSQL'], case_sensitive=False))
         if not encrypt:
             encrypt = click.confirm("Encrypt environment?", default=False)
         if encrypt and not encryption_key:
             encryption_key = click.prompt("Encryption key", type=str, hide_input=True, confirmation_prompt=True, prompt_suffix=": ")
+        if not connection_type and database.upper() == 'ORACLE':
+            connection_type = click.prompt("Oracle connection type", type=click.Choice(['service_name', 'sid'], case_sensitive=False), default='service_name')
     else:
         # Validate required fields when not in user input mode
-        if not all([host, port, user, password, service, type]):
+        if not all([host, port, user, password, service, database]):
             missing_fields = []
             if not host: missing_fields.append("host")
             if not port: missing_fields.append("port")
             if not user: missing_fields.append("user")
             if not password: missing_fields.append("password")
             if not service: missing_fields.append("service")
-            if not type: missing_fields.append("type")
+            if not database: missing_fields.append("database")
             raise click.UsageError(f"Missing required fields: {', '.join(missing_fields)}. Use --user-input flag to be prompted for values.")
 
     if encrypt and not encryption_key:
@@ -137,7 +139,7 @@ def create(name, host, port, user, password, service, type, overwrite, encrypt, 
         user=user,
         password=password,
         service=service,
-        db_type=type,
+        db_type=database,
         encrypt=encrypt,
         encryption_key=encryption_key,
         overwrite=overwrite,
@@ -156,9 +158,9 @@ def create(name, host, port, user, password, service, type, overwrite, encrypt, 
 @click.option("-u", "--user", is_flag=True, default=False, help="Show user of the environment")
 @click.option("-P", "--password", is_flag=True, default=False, help="Show password of the environment")
 @click.option("-s", "--service", is_flag=True, default=False, help="Show service of the environment")
-@click.option("-t", "--type", is_flag=True, default=False, help="Show type of the environment")
+@click.option("-d", "--database", is_flag=True, default=False, help="Show database type of the environment")
 @click.help_option('--help')
-def list(all, host, port, user, password, service, type):
+def list(all, host, port, user, password, service, database):
     """List all environments.
 
     Examples:
@@ -213,7 +215,7 @@ def list(all, host, port, user, password, service, type):
                     click.echo(f"password = {env['password']}")
                 if service and 'service' in env:
                     click.echo(f"service = {env['service']}")
-                if type and 'type' in env:
+                if database and 'type' in env:
                     click.echo(f"type = {env['type']}")
         click.echo("")
 
@@ -280,11 +282,11 @@ def show(name, encryption_key):
 @click.option("-u", "--user", required=False, help="User of the environment")
 @click.option("-P", "--password", required=False, help="Password of the environment")
 @click.option("-s", "--service", required=False, help="Service of the environment")
-@click.option("-t", "--type", required=False, type=click.Choice(['ORACLE', 'POSTGRES', 'MYSQL', 'MSSQL'], case_sensitive=False), help="Type of the environment")
+@click.option("-d", "--database", required=False, type=click.Choice(['ORACLE', 'POSTGRES', 'MYSQL', 'MSSQL'], case_sensitive=False), help="Database type of the environment")
 @click.option("-e", "--encrypt", is_flag=True, default=False, help="Encrypt the environment")
 @click.option("-k", "--encryption-key", required=False, help="The key to use for encryption. Required if --encrypt is used.")
 @click.help_option('--help')
-def update(name, host, port, user, password, service, type, encrypt, encryption_key):
+def update(name, host, port, user, password, service, database, encrypt, encryption_key):
     """Update a system environment.
 
     Examples:
@@ -309,7 +311,7 @@ def update(name, host, port, user, password, service, type, encrypt, encryption_
         raise click.UsageError("Option '--encryption-key' / '-k' is required when using '--encrypt' / '-e'.")
 
     # Check if any field is provided to update
-    if not any([host, port, user, password, service, type, encrypt]):
+    if not any([host, port, user, password, service, database, encrypt]):
         raise click.UsageError("At least one field must be provided to update")
 
     # Use core module to update environment
@@ -320,7 +322,7 @@ def update(name, host, port, user, password, service, type, encrypt, encryption_
         user=user,
         password=password,
         service=service,
-        db_type=type,
+        db_type=database,
         encrypt=encrypt,
         encryption_key=encryption_key
     )
