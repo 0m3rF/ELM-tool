@@ -35,7 +35,7 @@ class TestEnvironmentCore:
             user="postgres",
             password="password",
             service="mydb",
-            db_type="postgres",
+            database="postgres",
             encrypt=False,
             encryption_key=None,
             overwrite=False
@@ -60,7 +60,7 @@ class TestEnvironmentCore:
             user="postgres",
             password="password",
             service="mydb",
-            db_type="postgres",
+            database="postgres",
             encrypt=False,
             encryption_key=None,
             overwrite=False
@@ -91,7 +91,7 @@ class TestEnvironmentCore:
                 user="postgres",
                 password="password",
                 service="mydb",
-                db_type="postgres",
+                database="postgres",
                 encrypt=True,
                 encryption_key="secret-key",
                 overwrite=False
@@ -100,7 +100,7 @@ class TestEnvironmentCore:
             assert result.success is True
             mock_gen_key.assert_called_once_with("secret-key")
             # encrypt_data should be called for each field that needs encryption
-            assert mock_encrypt.call_count == 6  # host, port, user, password, service, db_type
+            assert mock_encrypt.call_count == 6  # host, port, user, password, service, database
 
     @patch('elm.core.environment.save_environment_config')
     @patch('elm.core.environment.load_environment_config')
@@ -119,7 +119,7 @@ class TestEnvironmentCore:
             user="postgres",
             password="password",
             service="mydb",
-            db_type="postgres",
+            database="postgres",
             encrypt=False,
             encryption_key=None,
             overwrite=False
@@ -147,7 +147,7 @@ class TestEnvironmentCore:
             user="system",
             password="oracle",
             service="XE",
-            db_type="ORACLE",
+            database="ORACLE",
             connection_type="service_name"
         )
 
@@ -176,7 +176,7 @@ class TestEnvironmentCore:
             user="system",
             password="oracle",
             service="ORCL",
-            db_type="ORACLE",
+            database="ORACLE",
             connection_type="sid"
         )
 
@@ -198,7 +198,7 @@ class TestEnvironmentCore:
             user="system",
             password="oracle",
             service="XE",
-            db_type="ORACLE",
+            database="ORACLE",
             connection_type="invalid_type"
         )
 
@@ -221,7 +221,7 @@ class TestEnvironmentCore:
             user="system",
             password="oracle",
             service="XE",
-            db_type="ORACLE"
+            database="ORACLE"
             # No connection_type specified - should default to service_name
         )
 
@@ -349,7 +349,7 @@ class TestEnvironmentCore:
             user=None,
             password=None,
             service=None,
-            db_type=None,
+            database=None,
             encrypt=None,
             encryption_key=None
         )
@@ -758,7 +758,7 @@ class TestEnvironmentEdgeCases:
             user="postgres",
             password="password",
             service="mydb",
-            db_type="postgres"
+            database="postgres"
         )
 
         assert result.success is False
@@ -1050,7 +1050,7 @@ class TestEnvironmentEdgeCases:
             user="postgres",
             password="password",
             service="mydb",
-            db_type="postgres",
+            database="postgres",
             encrypt=True,
             encryption_key="secret-key"
         )
