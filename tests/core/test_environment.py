@@ -415,6 +415,82 @@ class TestEnvironmentCore:
         assert result.success is True
         assert "Successfully connected to environment 'test-env'" in result.message
 
+    @patch('elm.core.environment._initialize_oracle_client')
+    @patch('elm.core.environment.create_engine')
+    @patch('elm.core.environment.get_connection_url')
+    def test_test_environment_oracle_thick_mode_activation(self, mock_get_url, mock_create_engine, mock_init_oracle):
+        """Test Oracle thick mode activation when DPY-3015 error occurs."""
+        mock_get_url.return_value = 'oracle+oracledb://system:oracle@oraserver:1521?service_name=XE'
+
+        # Mock the first connection attempt to fail with DPY-3015 error
+        mock_engine_first = MagicMock()
+        mock_engine_second = MagicMock()
+
+        # First call raises DPY-3015 error, second call succeeds
+        mock_create_engine.side_effect = [mock_engine_first, mock_engine_second]
+
+        # First connection fails with DPY-3015
+        dpy_error = Exception("DPY-3015: password verifier type 0x939 is not supported by python-oracledb in thin mode")
+        mock_engine_first.connect.return_value.__enter__.side_effect = dpy_error
+
+        # Second connection (after thick mode activation) succeeds
+        mock_connection_second = MagicMock()
+        mock_engine_second.connect.return_value.__enter__.return_value = mock_connection_second
+
+        # Mock successful Oracle client initialization
+        mock_init_oracle.return_value = True
+
+        result = environment.test_environment(name="oracle-env", encryption_key=None)
+
+        assert result.success is True
+        assert "Oracle thick mode activated" in result.message
+        # Verify that Oracle client initialization was called
+        mock_init_oracle.assert_called_once()
+        # Verify that create_engine was called twice (first attempt + retry)
+        assert mock_create_engine.call_count == 2
+
+    @patch('elm.core.environment._initialize_oracle_client')
+    @patch('elm.core.environment.create_engine')
+    @patch('elm.core.environment.get_connection_url')
+    def test_test_environment_oracle_thick_mode_fails(self, mock_get_url, mock_create_engine, mock_init_oracle):
+        """Test Oracle thick mode activation failure."""
+        mock_get_url.return_value = 'oracle+oracledb://system:oracle@oraserver:1521?service_name=XE'
+
+        # Mock the connection attempt to fail with DPY-3015 error
+        mock_engine = MagicMock()
+        mock_create_engine.return_value = mock_engine
+
+        # Connection fails with DPY-3015
+        dpy_error = Exception("DPY-3015: password verifier type 0x939 is not supported by python-oracledb in thin mode")
+        mock_engine.connect.return_value.__enter__.side_effect = dpy_error
+
+        # Mock failed Oracle client initialization
+        mock_init_oracle.return_value = False
+
+        result = environment.test_environment(name="oracle-env", encryption_key=None)
+
+        assert result.success is False
+        assert "DPY-3015" in result.message
+        # Verify that Oracle client initialization was called
+        mock_init_oracle.assert_called_once()
+
+    @patch('elm.core.environment.create_engine')
+    @patch('elm.core.environment.get_connection_url')
+    def test_test_environment_non_oracle_error(self, mock_get_url, mock_create_engine):
+        """Test that non-Oracle databases don't trigger thick mode activation."""
+        mock_get_url.return_value = 'postgresql://postgres:secret@localhost:5432/mydb'
+        mock_engine = MagicMock()
+        mock_create_engine.return_value = mock_engine
+
+        # Connection fails with a generic error
+        generic_error = Exception("Connection timeout")
+        mock_engine.connect.return_value.__enter__.side_effect = generic_error
+
+        result = environment.test_environment(name="postgres-env", encryption_key=None)
+
+        assert result.success is False
+        assert "Connection timeout" in result.message
+
     @patch('elm.core.environment.get_connection_url')
     def test_test_environment_failure(self, mock_get_url):
         """Test failed environment connection test."""

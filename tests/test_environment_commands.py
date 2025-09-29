@@ -582,7 +582,7 @@ class TestEnvironmentCLIEdgeCases:
             '--user', 'postgres',
             '--password', 'password',
             '--service', 'mydb',
-            '--type', 'POSTGRES',
+            '--database', 'POSTGRES',
             '--encrypt'
             # Missing --encryption-key
         ])
