@@ -29,12 +29,19 @@ def _initialize_oracle_client():
             try:
                 oracledb.init_oracle_client()
                 oracledb._client_initialized = True
-            except Exception:
+                print("✓ Oracle thick mode activated successfully")
+                return True
+            except Exception as e:
+                print(f"⚠ Failed to initialize Oracle thick mode: {str(e)}")
                 # If initialization fails, continue with thin mode
-                pass
+                return False
+        else:
+            # Already initialized
+            print("✓ Oracle thick mode already active")
+            return True
     except ImportError:
-        # oracledb not installed
-        pass
+        print("⚠ oracledb package not installed")
+        return False
 
 
 def _handle_oracle_connection_error(connection_url, original_error):
@@ -44,21 +51,30 @@ def _handle_oracle_connection_error(connection_url, original_error):
     # Check for thin mode password verifier errors
     if any(keyword in error_str for keyword in [
         'password verifier type', 'dpy-3015', 'not supported by python-oracledb in thin mode',
-        'thin mode', 'verifier'
+        'thin mode', 'verifier', '0x939'
     ]):
+        print(f"⚠ Detected Oracle thin mode compatibility issue: {str(original_error)}")
+        print("🔄 Attempting to activate Oracle thick mode...")
+
         try:
             # Try to initialize Oracle client and retry connection
-            _initialize_oracle_client()
+            if _initialize_oracle_client():
+                print("🔄 Retrying connection with thick mode...")
 
-            # Retry the connection with thick mode
-            engine = create_engine(connection_url)
-            with engine.connect() as connection:
-                result = connection.execute(text("SELECT 1"))
-                result.fetchall()
-            return True
-        except Exception:
-            # If thick mode also fails, raise the original error
-            pass
+                # Retry the connection with thick mode
+                engine = create_engine(connection_url)
+                with engine.connect() as connection:
+                    result = connection.execute(text("SELECT 1 FROM DUAL"))
+                    result.fetchall()
+                print("✓ Connection successful with Oracle thick mode")
+                return True
+            else:
+                print("✗ Failed to activate Oracle thick mode")
+                return False
+        except Exception as retry_error:
+            print(f"✗ Connection failed even with thick mode: {str(retry_error)}")
+            # If thick mode also fails, return False to raise the original error
+            return False
 
     return False
 
@@ -415,17 +431,22 @@ def test_environment(name: str, encryption_key: Optional[str] = None) -> Operati
 
         connection_url = get_connection_url(name, encryption_key)
 
+        # Determine the appropriate test query based on database type
+        test_query = "SELECT 1"
+        if 'oracle' in connection_url.lower():
+            test_query = "SELECT 1 FROM DUAL"
+
         try:
             engine = create_engine(connection_url)
             with engine.connect() as connection:
-                result = connection.execute(text("SELECT 1"))
+                result = connection.execute(text(test_query))
                 result.fetchall()
         except Exception as e:
             # Check if this is an Oracle connection and try to handle thin mode errors
             if 'oracle' in connection_url.lower():
                 if _handle_oracle_connection_error(connection_url, e):
                     # Connection succeeded after Oracle client initialization
-                    pass
+                    return create_success_result(f"Successfully connected to environment '{name}' (Oracle thick mode activated)")
                 else:
                     # Re-raise the original error
                     raise e

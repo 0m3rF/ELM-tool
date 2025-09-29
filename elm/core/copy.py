@@ -17,10 +17,10 @@ from elm.core.types import CopyConfig, WriteMode, FileFormat, OperationResult
 from elm.core.exceptions import CopyError, ValidationError, DatabaseError, FileError
 from elm.core.utils import (
     validate_write_mode, validate_file_format, ensure_directory_exists,
-    create_success_result, create_error_result, handle_exception, 
+    create_success_result, create_error_result, handle_exception,
     validate_required_params, convert_sqlalchemy_mode
 )
-from elm.core.environment import get_connection_url
+from elm.core.environment import get_connection_url, _initialize_oracle_client, _handle_oracle_connection_error
 from elm.core.masking import apply_masking
 
 
@@ -69,10 +69,38 @@ def execute_query(
                     result = apply_masking(result, environment)
                 
                 return result
-    except SQLAlchemyError as e:
-        raise DatabaseError(f"Database error: {str(e)}")
     except Exception as e:
-        raise CopyError(f"Error executing query: {str(e)}")
+        # Check if this is an Oracle connection and try to handle thin mode errors
+        if 'oracle' in connection_url.lower():
+            if _handle_oracle_connection_error(connection_url, e):
+                # Retry the query after Oracle client initialization
+                engine = create_engine(connection_url)
+                with engine.connect() as connection:
+                    if batch_size:
+                        result = pd.read_sql_query(query, connection, chunksize=batch_size)
+                        if not apply_masks:
+                            return result
+                        def masked_batches():
+                            for batch in result:
+                                yield apply_masking(batch, environment)
+                        return masked_batches()
+                    else:
+                        result = pd.read_sql_query(query, connection)
+                        if apply_masks:
+                            result = apply_masking(result, environment)
+                        return result
+            else:
+                # Re-raise the original error
+                if isinstance(e, SQLAlchemyError):
+                    raise DatabaseError(f"Database error: {str(e)}")
+                else:
+                    raise CopyError(f"Error executing query: {str(e)}")
+        else:
+            # Not an Oracle connection, re-raise the error
+            if isinstance(e, SQLAlchemyError):
+                raise DatabaseError(f"Database error: {str(e)}")
+            else:
+                raise CopyError(f"Error executing query: {str(e)}")
 
 
 def write_to_file(
@@ -182,7 +210,7 @@ def write_to_db(
     try:
         engine = create_engine(connection_url)
         if_exists = convert_sqlalchemy_mode(mode)
-        
+
         if batch_size and len(data) > batch_size:
             # Process in batches
             for i in range(0, len(data), batch_size):
@@ -192,11 +220,34 @@ def write_to_db(
         else:
             # Process all at once
             data.to_sql(table_name, engine, if_exists=if_exists, index=False)
-            
-    except SQLAlchemyError as e:
-        raise DatabaseError(f"Database error: {str(e)}")
+
     except Exception as e:
-        raise CopyError(f"Error writing to database: {str(e)}")
+        # Check if this is an Oracle connection and try to handle thin mode errors
+        if 'oracle' in connection_url.lower():
+            if _handle_oracle_connection_error(connection_url, e):
+                # Retry the write after Oracle client initialization
+                engine = create_engine(connection_url)
+                if_exists = convert_sqlalchemy_mode(mode)
+
+                if batch_size and len(data) > batch_size:
+                    for i in range(0, len(data), batch_size):
+                        batch = data.iloc[i:i+batch_size]
+                        current_if_exists = if_exists if i == 0 else 'append'
+                        batch.to_sql(table_name, engine, if_exists=current_if_exists, index=False)
+                else:
+                    data.to_sql(table_name, engine, if_exists=if_exists, index=False)
+            else:
+                # Re-raise the original error
+                if isinstance(e, SQLAlchemyError):
+                    raise DatabaseError(f"Database error: {str(e)}")
+                else:
+                    raise CopyError(f"Error writing to database: {str(e)}")
+        else:
+            # Not an Oracle connection, re-raise the error
+            if isinstance(e, SQLAlchemyError):
+                raise DatabaseError(f"Database error: {str(e)}")
+            else:
+                raise CopyError(f"Error writing to database: {str(e)}")
 
 
 def check_table_exists(connection_url: str, table_name: str) -> bool:
@@ -214,10 +265,26 @@ def check_table_exists(connection_url: str, table_name: str) -> bool:
         engine = create_engine(connection_url)
         inspector = inspect(engine)
         return inspector.has_table(table_name)
-    except SQLAlchemyError as e:
-        raise DatabaseError(f"Database error while checking table existence: {str(e)}")
     except Exception as e:
-        raise CopyError(f"Error checking table existence: {str(e)}")
+        # Check if this is an Oracle connection and try to handle thin mode errors
+        if 'oracle' in connection_url.lower():
+            if _handle_oracle_connection_error(connection_url, e):
+                # Retry after Oracle client initialization
+                engine = create_engine(connection_url)
+                inspector = inspect(engine)
+                return inspector.has_table(table_name)
+            else:
+                # Re-raise the original error
+                if isinstance(e, SQLAlchemyError):
+                    raise DatabaseError(f"Database error while checking table existence: {str(e)}")
+                else:
+                    raise CopyError(f"Error checking table existence: {str(e)}")
+        else:
+            # Not an Oracle connection, re-raise the error
+            if isinstance(e, SQLAlchemyError):
+                raise DatabaseError(f"Database error while checking table existence: {str(e)}")
+            else:
+                raise CopyError(f"Error checking table existence: {str(e)}")
 
 
 def get_table_columns(connection_url: str, table_name: str) -> Optional[List[str]]:
@@ -238,10 +305,29 @@ def get_table_columns(connection_url: str, table_name: str) -> Optional[List[str
             return None
         columns = inspector.get_columns(table_name)
         return [column['name'].lower() for column in columns]
-    except SQLAlchemyError as e:
-        raise DatabaseError(f"Database error while getting table columns: {str(e)}")
     except Exception as e:
-        raise CopyError(f"Error getting table columns: {str(e)}")
+        # Check if this is an Oracle connection and try to handle thin mode errors
+        if 'oracle' in connection_url.lower():
+            if _handle_oracle_connection_error(connection_url, e):
+                # Retry after Oracle client initialization
+                engine = create_engine(connection_url)
+                inspector = inspect(engine)
+                if not inspector.has_table(table_name):
+                    return None
+                columns = inspector.get_columns(table_name)
+                return [column['name'].lower() for column in columns]
+            else:
+                # Re-raise the original error
+                if isinstance(e, SQLAlchemyError):
+                    raise DatabaseError(f"Database error while getting table columns: {str(e)}")
+                else:
+                    raise CopyError(f"Error getting table columns: {str(e)}")
+        else:
+            # Not an Oracle connection, re-raise the error
+            if isinstance(e, SQLAlchemyError):
+                raise DatabaseError(f"Database error while getting table columns: {str(e)}")
+            else:
+                raise CopyError(f"Error getting table columns: {str(e)}")
 
 
 def validate_target_table(

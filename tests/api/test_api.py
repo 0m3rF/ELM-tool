@@ -46,7 +46,8 @@ class TestEnvironmentAPI:
             db_type="postgres",
             encrypt=False,
             encryption_key=None,
-            overwrite=False
+            overwrite=False,
+            connection_type=None
         )
 
     @patch('elm.core.environment.list_environments')
