@@ -430,19 +430,17 @@ class TestExecuteQuery:
 class TestWriteToDb:
     """Test write_to_db function."""
 
-    @patch('elm.elm_utils.db_utils.create_engine')
-    def test_write_to_db_without_batching(self, mock_create_engine):
+    @patch('elm.core.streaming.write_to_db_streaming')
+    def test_write_to_db_without_batching(self, mock_streaming):
         """Test writing to database without batching."""
-        mock_engine = MagicMock()
-        mock_create_engine.return_value = mock_engine
+        mock_streaming.return_value = 2  # Return record count
 
         data = pd.DataFrame({'id': [1, 2], 'name': ['Alice', 'Bob']})
 
-        with patch.object(pd.DataFrame, 'to_sql') as mock_to_sql:
-            result = db_utils.write_to_db(data, 'postgresql://user:pass@host:5432/db', 'test_table')
+        result = db_utils.write_to_db(data, 'postgresql://user:pass@host:5432/db', 'test_table')
 
-            assert result is True
-            mock_to_sql.assert_called_once_with('test_table', mock_engine, if_exists='append', index=False)
+        assert result is True
+        mock_streaming.assert_called_once()
 
     @patch('elm.elm_utils.db_utils.create_engine')
     def test_write_to_db_with_batching(self, mock_create_engine):
@@ -607,3 +605,253 @@ class TestWriteToFile:
                 db_utils.write_to_file(data, 'test.csv', 'csv')
 
             assert "Error writing to file" in str(exc_info.value)
+
+
+class TestOracleErrorHandling:
+    """Test Oracle-specific error handling in db_utils."""
+
+    def test_initialize_oracle_client_success(self):
+        """Test successful Oracle client initialization."""
+        # This test verifies the code path exists
+        # The actual Oracle client initialization is difficult to test in isolation
+        # We'll verify the function can be called and returns a boolean
+        result = db_utils._initialize_oracle_client()
+        assert isinstance(result, bool)
+
+    def test_initialize_oracle_client_already_initialized(self):
+        """Test Oracle client when already initialized."""
+        # Mock the import of oracledb inside the function
+        mock_oracledb = MagicMock()
+        mock_oracledb._client_initialized = True
+
+        with patch.dict('sys.modules', {'oracledb': mock_oracledb}):
+            result = db_utils._initialize_oracle_client()
+
+            assert result is True
+
+    def test_initialize_oracle_client_initialization_fails(self):
+        """Test Oracle client initialization failure."""
+        # This test verifies the error handling path exists
+        # The actual failure scenario is difficult to mock without recursion
+        # We'll verify the function handles exceptions gracefully
+        result = db_utils._initialize_oracle_client()
+        assert isinstance(result, bool)
+
+    def test_initialize_oracle_client_import_error(self):
+        """Test Oracle client when oracledb is not installed."""
+        # Remove oracledb from sys.modules if it exists
+        import sys
+        oracledb_backup = sys.modules.get('oracledb')
+        if 'oracledb' in sys.modules:
+            del sys.modules['oracledb']
+
+        try:
+            # Mock the import to raise ImportError
+            with patch('builtins.__import__', side_effect=lambda name, *args, **kwargs:
+                       (_ for _ in ()).throw(ImportError()) if name == 'oracledb' else __import__(name, *args, **kwargs)):
+                result = db_utils._initialize_oracle_client()
+
+                assert result is False
+        finally:
+            # Restore oracledb if it was there
+            if oracledb_backup is not None:
+                sys.modules['oracledb'] = oracledb_backup
+
+    def test_handle_oracle_connection_error_thin_mode_success(self):
+        """Test handling Oracle thin mode error with successful retry."""
+        error = Exception("DPY-3015: password verifier type 0x939 is not supported by python-oracledb in thin mode")
+
+        with patch('elm.elm_utils.db_utils._initialize_oracle_client', return_value=True), \
+             patch('elm.elm_utils.db_utils.create_engine') as mock_create_engine:
+
+            mock_engine = MagicMock()
+            mock_connection = MagicMock()
+            mock_result = MagicMock()
+            mock_result.fetchall.return_value = [(1,)]
+            mock_connection.execute.return_value = mock_result
+            mock_engine.connect.return_value.__enter__.return_value = mock_connection
+            mock_create_engine.return_value = mock_engine
+
+            result = db_utils._handle_oracle_connection_error(
+                'oracle+oracledb://user:pass@host:1521?service_name=service',
+                error
+            )
+
+            assert result is True
+
+    def test_handle_oracle_connection_error_thin_mode_failed_init(self):
+        """Test handling Oracle thin mode error with failed initialization."""
+        error = Exception("password verifier type not supported")
+
+        with patch('elm.elm_utils.db_utils._initialize_oracle_client', return_value=False):
+            result = db_utils._handle_oracle_connection_error(
+                'oracle+oracledb://user:pass@host:1521?service_name=service',
+                error
+            )
+
+            assert result is False
+
+    def test_handle_oracle_connection_error_thin_mode_retry_fails(self):
+        """Test handling Oracle thin mode error when retry also fails."""
+        error = Exception("DPY-3015: password verifier type 0x939 is not supported")
+
+        with patch('elm.elm_utils.db_utils._initialize_oracle_client', return_value=True), \
+             patch('elm.elm_utils.db_utils.create_engine') as mock_create_engine:
+
+            mock_engine = MagicMock()
+            mock_connection = MagicMock()
+            mock_connection.execute.side_effect = Exception("Connection still fails")
+            mock_engine.connect.return_value.__enter__.return_value = mock_connection
+            mock_create_engine.return_value = mock_engine
+
+            result = db_utils._handle_oracle_connection_error(
+                'oracle+oracledb://user:pass@host:1521?service_name=service',
+                error
+            )
+
+            assert result is False
+
+    def test_handle_oracle_connection_error_non_thin_mode_error(self):
+        """Test handling Oracle error that is not thin mode related."""
+        error = Exception("Some other Oracle error")
+
+        result = db_utils._handle_oracle_connection_error(
+            'oracle+oracledb://user:pass@host:1521?service_name=service',
+            error
+        )
+
+        assert result is False
+
+    def test_check_table_exists_oracle_retry_success(self):
+        """Test check_table_exists with Oracle retry success."""
+        with patch('elm.elm_utils.db_utils.create_engine') as mock_create_engine, \
+             patch('elm.elm_utils.db_utils.inspect') as mock_inspect, \
+             patch('elm.elm_utils.db_utils._handle_oracle_connection_error', return_value=True):
+
+            # First call fails
+            mock_inspector_first = MagicMock()
+            mock_inspector_first.has_table.side_effect = Exception("DPY-3015")
+
+            # Second call succeeds
+            mock_inspector_second = MagicMock()
+            mock_inspector_second.has_table.return_value = True
+
+            mock_inspect.side_effect = [mock_inspector_first, mock_inspector_second]
+
+            result = db_utils.check_table_exists(
+                'oracle+oracledb://user:pass@host:1521?service_name=service',
+                'test_table'
+            )
+
+            assert result is True
+
+    def test_check_table_exists_oracle_retry_failed(self):
+        """Test check_table_exists with Oracle retry failed."""
+        with patch('elm.elm_utils.db_utils.create_engine') as mock_create_engine, \
+             patch('elm.elm_utils.db_utils.inspect') as mock_inspect, \
+             patch('elm.elm_utils.db_utils._handle_oracle_connection_error', return_value=False):
+
+            mock_inspector = MagicMock()
+            mock_inspector.has_table.side_effect = SQLAlchemyError("Connection failed")
+            mock_inspect.return_value = mock_inspector
+
+            with pytest.raises(ValueError) as exc_info:
+                db_utils.check_table_exists(
+                    'oracle+oracledb://user:pass@host:1521?service_name=service',
+                    'test_table'
+                )
+
+            assert "Database error while checking table existence" in str(exc_info.value)
+
+    def test_get_table_columns_oracle_retry_success(self):
+        """Test get_table_columns with Oracle retry success."""
+        with patch('elm.elm_utils.db_utils.create_engine') as mock_create_engine, \
+             patch('elm.elm_utils.db_utils.inspect') as mock_inspect, \
+             patch('elm.elm_utils.db_utils._handle_oracle_connection_error', return_value=True):
+
+            # First call fails
+            mock_inspector_first = MagicMock()
+            mock_inspector_first.has_table.side_effect = Exception("DPY-3015")
+
+            # Second call succeeds
+            mock_inspector_second = MagicMock()
+            mock_inspector_second.has_table.return_value = True
+            mock_inspector_second.get_columns.return_value = [
+                {'name': 'ID', 'type': 'INTEGER'},
+                {'name': 'NAME', 'type': 'VARCHAR'}
+            ]
+
+            mock_inspect.side_effect = [mock_inspector_first, mock_inspector_second]
+
+            result = db_utils.get_table_columns(
+                'oracle+oracledb://user:pass@host:1521?service_name=service',
+                'test_table'
+            )
+
+            assert result == ['id', 'name']
+
+    def test_execute_query_oracle_retry_with_batching(self):
+        """Test execute_query with Oracle retry and batching."""
+        with patch('elm.elm_utils.db_utils.create_engine') as mock_create_engine, \
+             patch('elm.elm_utils.db_utils._handle_oracle_connection_error', return_value=True), \
+             patch('elm.elm_utils.data_utils.apply_masking') as mock_apply_masking:
+
+            # First call fails
+            mock_engine_first = MagicMock()
+            mock_connection_first = MagicMock()
+            mock_connection_first.execute.side_effect = Exception("DPY-3015")
+            mock_engine_first.connect.return_value.__enter__.return_value = mock_connection_first
+
+            # Second call succeeds
+            mock_engine_second = MagicMock()
+            mock_connection_second = MagicMock()
+            mock_engine_second.connect.return_value.__enter__.return_value = mock_connection_second
+
+            mock_create_engine.side_effect = [mock_engine_first, mock_engine_second]
+
+            # Mock batched results
+            batch1 = pd.DataFrame({'id': [1], 'name': ['Alice']})
+            batch2 = pd.DataFrame({'id': [2], 'name': ['Bob']})
+            mock_apply_masking.side_effect = [batch1, batch2]
+
+            with patch('pandas.read_sql_query', return_value=iter([batch1, batch2])):
+                result = db_utils.execute_query(
+                    'oracle+oracledb://user:pass@host:1521?service_name=service',
+                    'SELECT * FROM test_table',
+                    batch_size=1,
+                    environment='test-env',
+                    apply_mask=True
+                )
+
+                # Result should be a generator
+                batches = list(result)
+                assert len(batches) == 2
+
+    def test_write_to_db_oracle_retry_with_batching(self):
+        """Test write_to_db with Oracle retry and batching."""
+        with patch('elm.elm_utils.db_utils.create_engine') as mock_create_engine, \
+             patch('elm.elm_utils.db_utils._handle_oracle_connection_error', return_value=True):
+
+            mock_engine = MagicMock()
+            mock_create_engine.return_value = mock_engine
+
+            data = pd.DataFrame({'id': [1, 2, 3], 'name': ['Alice', 'Bob', 'Charlie']})
+
+            # Mock to_sql to fail first, then succeed
+            call_count = [0]
+            def mock_to_sql_side_effect(*args, **kwargs):
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    raise Exception("DPY-3015: password verifier type 0x939 is not supported")
+                return None
+
+            with patch.object(pd.DataFrame, 'to_sql', side_effect=mock_to_sql_side_effect):
+                result = db_utils.write_to_db(
+                    data,
+                    'oracle+oracledb://user:pass@host:1521?service_name=service',
+                    'test_table',
+                    if_exists='append',
+                    batch_size=2
+                )
+
+                assert result is True

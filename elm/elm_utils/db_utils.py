@@ -254,35 +254,55 @@ def execute_query(connection_url, query, batch_size=None, environment=None, appl
                 raise ValueError(f"Error executing query: {str(e)}")
 
 def write_to_db(data, connection_url, table_name, if_exists='append', batch_size=None):
-    """Write data to a database table"""
+    """Write data to a database table using optimized streaming"""
     try:
-        engine = create_engine(connection_url)
+        # Import streaming module
+        from elm.core.streaming import write_to_db_streaming
+        from elm.core.types import WriteMode
 
-        if batch_size and len(data) > batch_size:
-            # Write in batches
-            for i in range(0, len(data), batch_size):
-                batch = data.iloc[i:i+batch_size]
-                current_if_exists = if_exists if i == 0 else 'append'
-                batch.to_sql(table_name, engine, if_exists=current_if_exists, index=False)
-        else:
-            # Write all at once
-            data.to_sql(table_name, engine, if_exists=if_exists, index=False)
+        # Convert if_exists to WriteMode
+        mode_map = {
+            'append': WriteMode.APPEND,
+            'replace': WriteMode.REPLACE,
+            'fail': WriteMode.FAIL
+        }
+        mode = mode_map.get(if_exists, WriteMode.APPEND)
+
+        # Use optimized streaming write
+        write_to_db_streaming(
+            data=data,
+            connection_url=connection_url,
+            table_name=table_name,
+            mode=mode,
+            batch_size=batch_size,
+            use_optimized=True
+        )
 
         return True
+
     except Exception as e:
         # Check if this is an Oracle connection and try to handle thin mode errors
         if 'oracle' in connection_url.lower():
             if _handle_oracle_connection_error(connection_url, e):
-                # Retry the write after Oracle client initialization
-                engine = create_engine(connection_url)
+                # Retry with streaming after Oracle client initialization
+                from elm.core.streaming import write_to_db_streaming
+                from elm.core.types import WriteMode
 
-                if batch_size and len(data) > batch_size:
-                    for i in range(0, len(data), batch_size):
-                        batch = data.iloc[i:i+batch_size]
-                        current_if_exists = if_exists if i == 0 else 'append'
-                        batch.to_sql(table_name, engine, if_exists=current_if_exists, index=False)
-                else:
-                    data.to_sql(table_name, engine, if_exists=if_exists, index=False)
+                mode_map = {
+                    'append': WriteMode.APPEND,
+                    'replace': WriteMode.REPLACE,
+                    'fail': WriteMode.FAIL
+                }
+                mode = mode_map.get(if_exists, WriteMode.APPEND)
+
+                write_to_db_streaming(
+                    data=data,
+                    connection_url=connection_url,
+                    table_name=table_name,
+                    mode=mode,
+                    batch_size=batch_size,
+                    use_optimized=True
+                )
 
                 return True
             else:
