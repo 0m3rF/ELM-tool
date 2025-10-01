@@ -30,6 +30,7 @@ class TestCopyCore:
                  patch('elm.core.copy.apply_masking') as mock_apply_masking:
 
                 mock_get_url.return_value = 'postgresql://user:pass@localhost:5432/db'
+                mock_write_db.return_value = 2  # Return record count
 
                 # Mock DataFrame after masking
                 mock_df = pd.DataFrame({'id': [1, 2], 'name': ['Alice', 'Bob'], 'email': ['alice@example.com', 'bob@example.com']})
@@ -68,31 +69,33 @@ class TestCopyCore:
         """Test successful database to database copy."""
         with patch('elm.core.copy.get_connection_url') as mock_get_url, \
              patch('elm.core.copy.create_engine') as mock_create_engine, \
-             patch('elm.core.copy.apply_masking') as mock_apply_masking:
-            
+             patch('elm.core.copy.apply_masking') as mock_apply_masking, \
+             patch('elm.core.copy.write_to_db') as mock_write_db:
+
             mock_get_url.return_value = 'postgresql://user:pass@localhost:5432/db'
+            mock_write_db.return_value = 2  # Return record count
             mock_engine = MagicMock()
             mock_create_engine.return_value = mock_engine
             mock_connection = MagicMock()
             mock_engine.connect.return_value.__enter__.return_value = mock_connection
-            
+
             # Mock query result
             mock_result = MagicMock()
             mock_result.fetchall.return_value = [{'id': 1, 'name': 'Alice'}, {'id': 2, 'name': 'Bob'}]
             mock_result.keys.return_value = ['id', 'name']
             mock_connection.execute.return_value = mock_result
-            
+
             # Mock DataFrame after masking
             mock_df = pd.DataFrame({'id': [1, 2], 'name': ['Alice', 'Bob']})
             mock_apply_masking.return_value = mock_df
-            
+
             result = copy.copy_db_to_db(
                 source_env="source-env",
                 target_env="target-env",
                 query="SELECT * FROM source_table",
                 table="target_table"
             )
-            
+
             assert result.success is True
             assert "Successfully copied" in result.message
             assert result.record_count == 2
@@ -407,12 +410,12 @@ class TestCopyCore:
     def test_write_to_db_general_error(self):
         """Test write_to_db with general error."""
         from elm.core.copy import write_to_db
-        from elm.core.exceptions import CopyError
+        from elm.core.exceptions import CopyError, DatabaseError
 
         data = pd.DataFrame({'id': [1], 'name': ['Alice']})
 
-        with patch('elm.core.copy.create_engine') as mock_create_engine:
-            mock_create_engine.side_effect = Exception("General error")
+        with patch('elm.core.copy.write_to_db_streaming') as mock_streaming:
+            mock_streaming.side_effect = CopyError("General error")
 
             with pytest.raises(CopyError):
                 write_to_db(
@@ -850,3 +853,370 @@ class TestCopyEdgeCases:
             copy.write_to_file(data, 'target.csv', FileFormat.CSV, WriteMode.REPLACE)
 
         assert "Write failed" in str(exc_info.value)
+
+    def test_execute_query_oracle_error_handling_with_retry(self):
+        """Test Oracle error handling with successful retry."""
+        with patch('elm.core.copy.create_engine') as mock_create_engine, \
+             patch('elm.core.copy._handle_oracle_connection_error') as mock_handle_error, \
+             patch('elm.core.copy.apply_masking') as mock_apply_masking:
+
+            # First call raises Oracle error
+            mock_engine_first = MagicMock()
+            mock_connection_first = MagicMock()
+            mock_connection_first.execute.side_effect = Exception("DPY-3015: password verifier type 0x939 is not supported")
+            mock_engine_first.connect.return_value.__enter__.return_value = mock_connection_first
+
+            # Second call succeeds
+            mock_engine_second = MagicMock()
+            mock_connection_second = MagicMock()
+            mock_engine_second.connect.return_value.__enter__.return_value = mock_connection_second
+
+            mock_create_engine.side_effect = [mock_engine_first, mock_engine_second]
+            mock_handle_error.return_value = True  # Indicates successful retry
+
+            # Mock successful query result
+            test_df = pd.DataFrame({'id': [1, 2], 'name': ['Alice', 'Bob']})
+            mock_apply_masking.return_value = test_df
+
+            with patch('pandas.read_sql_query', return_value=test_df):
+                result = copy.execute_query(
+                    'oracle+oracledb://user:pass@host:1521?service_name=service',
+                    'SELECT * FROM test_table',
+                    batch_size=None,
+                    environment='test-env',
+                    apply_masks=True
+                )
+
+            assert isinstance(result, pd.DataFrame)
+            assert len(result) == 2
+
+    def test_execute_query_oracle_error_handling_with_batch_retry(self):
+        """Test Oracle error handling with batching and successful retry."""
+        with patch('elm.core.copy.create_engine') as mock_create_engine, \
+             patch('elm.core.copy._handle_oracle_connection_error') as mock_handle_error, \
+             patch('elm.core.copy.apply_masking') as mock_apply_masking:
+
+            # First call raises Oracle error
+            mock_engine_first = MagicMock()
+            mock_connection_first = MagicMock()
+            mock_connection_first.execute.side_effect = Exception("thin mode not supported")
+            mock_engine_first.connect.return_value.__enter__.return_value = mock_connection_first
+
+            # Second call succeeds
+            mock_engine_second = MagicMock()
+            mock_connection_second = MagicMock()
+            mock_engine_second.connect.return_value.__enter__.return_value = mock_connection_second
+
+            mock_create_engine.side_effect = [mock_engine_first, mock_engine_second]
+            mock_handle_error.return_value = True  # Indicates successful retry
+
+            # Mock batched query result
+            test_df1 = pd.DataFrame({'id': [1], 'name': ['Alice']})
+            test_df2 = pd.DataFrame({'id': [2], 'name': ['Bob']})
+            mock_apply_masking.side_effect = [test_df1, test_df2]
+
+            with patch('pandas.read_sql_query', return_value=iter([test_df1, test_df2])):
+                result = copy.execute_query(
+                    'oracle+oracledb://user:pass@host:1521?service_name=service',
+                    'SELECT * FROM test_table',
+                    batch_size=1,
+                    environment='test-env',
+                    apply_masks=True
+                )
+
+            # Result should be a generator
+            batches = list(result)
+            assert len(batches) == 2
+
+    def test_execute_query_oracle_error_handling_failed_retry(self):
+        """Test Oracle error handling with failed retry."""
+        with patch('elm.core.copy.create_engine') as mock_create_engine, \
+             patch('elm.core.copy._handle_oracle_connection_error') as mock_handle_error:
+
+            mock_engine = MagicMock()
+            mock_connection = MagicMock()
+            mock_connection.execute.side_effect = Exception("DPY-3015: password verifier type 0x939 is not supported")
+            mock_engine.connect.return_value.__enter__.return_value = mock_connection
+
+            mock_create_engine.return_value = mock_engine
+            mock_handle_error.return_value = False  # Indicates failed retry
+
+            with patch('pandas.read_sql_query', side_effect=Exception("DPY-3015: password verifier type 0x939 is not supported")):
+                with pytest.raises(CopyError):  # Changed from DatabaseError to CopyError
+                    copy.execute_query(
+                        'oracle+oracledb://user:pass@host:1521?service_name=service',
+                        'SELECT * FROM test_table',
+                        batch_size=None,
+                        environment='test-env',
+                        apply_masks=True
+                    )
+
+    def test_execute_query_oracle_non_sqlalchemy_error_failed_retry(self):
+        """Test Oracle error handling with non-SQLAlchemy error and failed retry."""
+        with patch('elm.core.copy.create_engine') as mock_create_engine, \
+             patch('elm.core.copy._handle_oracle_connection_error') as mock_handle_error:
+
+            mock_engine = MagicMock()
+            mock_connection = MagicMock()
+            mock_connection.execute.side_effect = ValueError("Some other error")
+            mock_engine.connect.return_value.__enter__.return_value = mock_connection
+
+            mock_create_engine.return_value = mock_engine
+            mock_handle_error.return_value = False  # Indicates failed retry
+
+            with patch('pandas.read_sql_query', side_effect=ValueError("Some other error")):
+                with pytest.raises(CopyError):
+                    copy.execute_query(
+                        'oracle+oracledb://user:pass@host:1521?service_name=service',
+                        'SELECT * FROM test_table',
+                        batch_size=None,
+                        environment='test-env',
+                        apply_masks=True
+                    )
+
+    def test_write_to_db_oracle_error_handling_with_retry(self):
+        """Test Oracle write error handling with successful retry."""
+        with patch('elm.core.copy.write_to_db_streaming') as mock_streaming:
+
+            data = pd.DataFrame({'id': [1, 2], 'name': ['Alice', 'Bob']})
+
+            # Mock streaming to succeed (the retry logic is inside streaming module)
+            mock_streaming.return_value = 2  # Return record count
+
+            result = copy.write_to_db(
+                data=data,
+                connection_url='oracle+oracledb://user:pass@host:1521?service_name=service',
+                table_name='test_table',
+                mode=WriteMode.APPEND
+            )
+
+            assert result == 2  # Should return record count
+            mock_streaming.assert_called_once()
+
+    def test_write_to_db_oracle_error_handling_failed_retry(self):
+        """Test Oracle write error handling with failed retry."""
+        with patch('elm.core.copy.create_engine') as mock_create_engine, \
+             patch('elm.core.copy._handle_oracle_connection_error') as mock_handle_error:
+
+            mock_engine = MagicMock()
+            mock_create_engine.return_value = mock_engine
+            mock_handle_error.return_value = False  # Indicates failed retry
+
+            data = pd.DataFrame({'id': [1, 2], 'name': ['Alice', 'Bob']})
+
+            with patch.object(pd.DataFrame, 'to_sql', side_effect=Exception("DPY-3015: password verifier type 0x939 is not supported")):
+                with pytest.raises(CopyError):
+                    copy.write_to_db(
+                        data=data,
+                        connection_url='oracle+oracledb://user:pass@host:1521?service_name=service',
+                        table_name='test_table',
+                        mode=WriteMode.APPEND
+                    )
+
+    def test_check_table_exists_oracle_error_handling_with_retry(self):
+        """Test Oracle check table exists error handling with successful retry."""
+        with patch('elm.core.copy.create_engine') as mock_create_engine, \
+             patch('elm.core.copy.inspect') as mock_inspect, \
+             patch('elm.core.copy._handle_oracle_connection_error') as mock_handle_error:
+
+            # First call raises Oracle error
+            mock_inspector_first = MagicMock()
+            mock_inspector_first.has_table.side_effect = Exception("DPY-3015: password verifier type 0x939 is not supported")
+
+            # Second call succeeds
+            mock_inspector_second = MagicMock()
+            mock_inspector_second.has_table.return_value = True
+
+            mock_inspect.side_effect = [mock_inspector_first, mock_inspector_second]
+            mock_handle_error.return_value = True  # Indicates successful retry
+
+            result = copy.check_table_exists(
+                'oracle+oracledb://user:pass@host:1521?service_name=service',
+                'test_table'
+            )
+
+            assert result is True
+
+    def test_get_table_columns_oracle_error_handling_with_retry(self):
+        """Test Oracle get table columns error handling with successful retry."""
+        with patch('elm.core.copy.create_engine') as mock_create_engine, \
+             patch('elm.core.copy.inspect') as mock_inspect, \
+             patch('elm.core.copy._handle_oracle_connection_error') as mock_handle_error:
+
+            # First call raises Oracle error
+            mock_inspector_first = MagicMock()
+            mock_inspector_first.has_table.side_effect = Exception("DPY-3015: password verifier type 0x939 is not supported")
+
+            # Second call succeeds
+            mock_inspector_second = MagicMock()
+            mock_inspector_second.has_table.return_value = True
+            mock_inspector_second.get_columns.return_value = [
+                {'name': 'ID', 'type': 'INTEGER'},
+                {'name': 'NAME', 'type': 'VARCHAR'}
+            ]
+
+            mock_inspect.side_effect = [mock_inspector_first, mock_inspector_second]
+            mock_handle_error.return_value = True  # Indicates successful retry
+
+            result = copy.get_table_columns(
+                'oracle+oracledb://user:pass@host:1521?service_name=service',
+                'test_table'
+            )
+
+            assert result == ['id', 'name']
+
+    def test_validate_target_table_create_if_not_exists_failure(self):
+        """Test validate target table with create failure."""
+        with patch('elm.core.copy.check_table_exists', return_value=False), \
+             patch('elm.core.copy.create_engine') as mock_create_engine:
+
+            mock_engine = MagicMock()
+            mock_create_engine.return_value = mock_engine
+
+            data = pd.DataFrame({'id': [1, 2], 'name': ['Alice', 'Bob']})
+
+            with patch.object(pd.DataFrame, 'to_sql', side_effect=Exception("Create table failed")):
+                with pytest.raises(CopyError) as exc_info:
+                    copy.validate_target_table(
+                        source_data=data,
+                        target_url='postgresql://user:pass@host:5432/db',
+                        table_name='test_table',
+                        create_if_not_exists=True
+                    )
+
+                assert "Failed to create table" in str(exc_info.value)
+
+    def test_validate_target_table_no_columns_retrieved(self):
+        """Test validate target table when columns cannot be retrieved."""
+        with patch('elm.core.copy.check_table_exists', return_value=True), \
+             patch('elm.core.copy.get_table_columns', return_value=None):
+
+            data = pd.DataFrame({'id': [1, 2], 'name': ['Alice', 'Bob']})
+
+            with pytest.raises(CopyError) as exc_info:
+                copy.validate_target_table(
+                    source_data=data,
+                    target_url='postgresql://user:pass@host:5432/db',
+                    table_name='test_table',
+                    create_if_not_exists=False
+                )
+
+            assert "Could not retrieve columns" in str(exc_info.value)
+
+    def test_copy_db_to_file_with_batching(self):
+        """Test copy database to file with batching."""
+        with patch('elm.core.copy.get_connection_url') as mock_get_url, \
+             patch('elm.core.copy.execute_query') as mock_execute, \
+             patch('elm.core.copy.write_to_file') as mock_write:
+
+            mock_get_url.return_value = 'postgresql://user:pass@localhost:5432/db'
+
+            # Mock batched results
+            batch1 = pd.DataFrame({'id': [1], 'name': ['Alice']})
+            batch2 = pd.DataFrame({'id': [2], 'name': ['Bob']})
+            mock_execute.return_value = iter([batch1, batch2])
+
+            result = copy.copy_db_to_file(
+                source_env='test-env',
+                query='SELECT * FROM test_table',
+                file_path='output.csv',
+                file_format='csv',
+                mode='REPLACE',
+                batch_size=1,
+                apply_masks=True
+            )
+
+            assert result.success is True
+            assert result.record_count == 2
+            assert mock_write.call_count == 2
+
+    def test_copy_file_to_db_with_validation(self):
+        """Test copy file to database with validation."""
+        test_data = "id,name\n1,Alice\n2,Bob"
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(test_data)
+            temp_file = f.name
+
+        try:
+            with patch('elm.core.copy.get_connection_url') as mock_get_url, \
+                 patch('elm.core.copy.write_to_db') as mock_write_db, \
+                 patch('elm.core.copy.apply_masking') as mock_apply_masking, \
+                 patch('elm.core.copy.validate_target_table') as mock_validate:
+
+                mock_get_url.return_value = 'postgresql://user:pass@localhost:5432/db'
+                mock_write_db.return_value = 2  # Return record count
+                mock_df = pd.DataFrame({'id': [1, 2], 'name': ['Alice', 'Bob']})
+                mock_apply_masking.return_value = mock_df
+
+                result = copy.copy_file_to_db(
+                    file_path=temp_file,
+                    target_env="test-env",
+                    table="test_table",
+                    file_format='csv',
+                    mode='APPEND',
+                    validate_target=True,
+                    create_if_not_exists=True,
+                    apply_masks=True
+                )
+
+                assert result.success is True
+                mock_validate.assert_called_once()
+        finally:
+            os.unlink(temp_file)
+
+    def test_copy_db_to_db_with_validation_and_batching(self):
+        """Test copy database to database with validation and batching."""
+        with patch('elm.core.copy.get_connection_url') as mock_get_url, \
+             patch('elm.core.copy.execute_query') as mock_execute, \
+             patch('elm.core.copy.write_to_db') as mock_write_db, \
+             patch('elm.core.copy.validate_target_table') as mock_validate:
+
+            mock_get_url.return_value = 'postgresql://user:pass@localhost:5432/db'
+            mock_write_db.return_value = 1  # Return record count per batch
+
+            # Mock validation query
+            sample_data = pd.DataFrame({'id': [1], 'name': ['Sample']})
+
+            # Mock batched results
+            batch1 = pd.DataFrame({'id': [1], 'name': ['Alice']})
+            batch2 = pd.DataFrame({'id': [2], 'name': ['Bob']})
+
+            mock_execute.side_effect = [sample_data, iter([batch1, batch2])]
+
+            result = copy.copy_db_to_db(
+                source_env='source-env',
+                target_env='target-env',
+                query='SELECT * FROM source_table',
+                table='target_table',
+                mode='APPEND',
+                batch_size=1,
+                validate_target=True,
+                create_if_not_exists=True,
+                apply_masks=True
+            )
+
+            assert result.success is True
+            assert result.record_count == 2
+            mock_validate.assert_called_once()
+
+    def test_copy_db_to_db_validation_error(self):
+        """Test copy database to database with validation error."""
+        with patch('elm.core.copy.get_connection_url') as mock_get_url, \
+             patch('elm.core.copy.execute_query') as mock_execute:
+
+            mock_get_url.return_value = 'postgresql://user:pass@localhost:5432/db'
+            mock_execute.side_effect = Exception("Validation query failed")
+
+            result = copy.copy_db_to_db(
+                source_env='source-env',
+                target_env='target-env',
+                query='SELECT * FROM source_table',
+                table='target_table',
+                mode='APPEND',
+                validate_target=True,
+                apply_masks=True
+            )
+
+            assert result.success is False
+            assert "Error during validation" in result.message

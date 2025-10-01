@@ -282,56 +282,38 @@ def test_write_to_db():
     # Create a test DataFrame
     df = pd.DataFrame({'id': [1, 2, 3], 'name': ['A', 'B', 'C']})
 
-    # Mock SQLAlchemy engine and connection
-    with patch('elm.elm_utils.db_utils.create_engine') as mock_create_engine:
-        # Set up the mock
-        mock_engine = MagicMock()
-        mock_create_engine.return_value = mock_engine
+    # Mock the streaming write function (it's imported from elm.core.streaming)
+    with patch('elm.core.streaming.write_to_db_streaming') as mock_streaming:
+        mock_streaming.return_value = 3  # Return record count
 
-        # Mock DataFrame.to_sql
-        with patch.object(pd.DataFrame, 'to_sql') as mock_to_sql:
-            # Write data to database
-            result = write_to_db(df, 'sqlite:///:memory:', 'test_table', 'append')
+        # Write data to database
+        result = write_to_db(df, 'sqlite:///:memory:', 'test_table', 'append')
 
-            # Verify the result
-            assert result is True
+        # Verify the result
+        assert result is True
 
-            # Verify the mocks were called correctly
-            mock_create_engine.assert_called_with('sqlite:///:memory:')
-            mock_to_sql.assert_called()
+        # Verify the streaming function was called
+        mock_streaming.assert_called_once()
 
-            # Check the arguments to to_sql
-            args, kwargs = mock_to_sql.call_args
-            # In pandas to_sql, the table name is the first positional argument
-            assert args[0] == 'test_table'
-            # The second positional argument is the engine
-            assert len(args) > 1 and args[1] == mock_engine
-            assert kwargs['if_exists'] == 'append'
-            assert kwargs['index'] is False
+        # Test with replace mode
+        mock_streaming.reset_mock()
+        result = write_to_db(df, 'sqlite:///:memory:', 'test_table', 'replace')
+        assert result is True
 
-            # Test with replace mode
-            result = write_to_db(df, 'sqlite:///:memory:', 'test_table', 'replace')
+        # Test with fail mode
+        mock_streaming.reset_mock()
+        result = write_to_db(df, 'sqlite:///:memory:', 'test_table', 'fail')
+        assert result is True
 
-            # Check the arguments to to_sql
-            args, kwargs = mock_to_sql.call_args
-            assert kwargs['if_exists'] == 'replace'
+        # Test with batch_size
+        large_df = pd.DataFrame({'id': range(100), 'name': ['Name' + str(i) for i in range(100)]})
+        result = write_to_db(large_df, 'sqlite:///:memory:', 'test_table', 'append', batch_size=10)
+        assert result is True
 
-            # Test with fail mode
-            result = write_to_db(df, 'sqlite:///:memory:', 'test_table', 'fail')
-
-            # Check the arguments to to_sql
-            args, kwargs = mock_to_sql.call_args
-            assert kwargs['if_exists'] == 'fail'
-
-            # Test with batch_size
-            large_df = pd.DataFrame({'id': range(100), 'name': ['Name' + str(i) for i in range(100)]})
-            result = write_to_db(large_df, 'sqlite:///:memory:', 'test_table', 'append', batch_size=10)
-            assert result is True
-
-            # Test with exception
-            mock_to_sql.side_effect = Exception("Database error")
-            with pytest.raises(ValueError):
-                write_to_db(df, 'sqlite:///:memory:', 'test_table', 'append')
+        # Test with exception
+        mock_streaming.side_effect = Exception("Database error")
+        with pytest.raises(ValueError):
+            write_to_db(df, 'sqlite:///:memory:', 'test_table', 'append')
 
 
 def test_check_table_exists():

@@ -22,6 +22,7 @@ from elm.core.utils import (
 )
 from elm.core.environment import get_connection_url, _initialize_oracle_client, _handle_oracle_connection_error
 from elm.core.masking import apply_masking
+from elm.core.streaming import write_to_db_streaming
 
 
 def execute_query(
@@ -195,59 +196,32 @@ def write_to_db(
     connection_url: str,
     table_name: str,
     mode: WriteMode = WriteMode.APPEND,
-    batch_size: Optional[int] = None
-) -> None:
+    batch_size: Optional[int] = None,
+    use_streaming: bool = True
+) -> int:
     """
-    Write data to a database table.
-    
+    Write data to a database table using optimized streaming methods.
+
     Args:
         data: DataFrame to write
         connection_url: Database connection URL
         table_name: Target table name
         mode: Write mode (APPEND, REPLACE, FAIL)
         batch_size: Batch size for large datasets
+        use_streaming: Whether to use optimized streaming (default: True)
+
+    Returns:
+        Number of records written
     """
-    try:
-        engine = create_engine(connection_url)
-        if_exists = convert_sqlalchemy_mode(mode)
-
-        if batch_size and len(data) > batch_size:
-            # Process in batches
-            for i in range(0, len(data), batch_size):
-                batch = data.iloc[i:i+batch_size]
-                current_if_exists = if_exists if i == 0 else 'append'
-                batch.to_sql(table_name, engine, if_exists=current_if_exists, index=False)
-        else:
-            # Process all at once
-            data.to_sql(table_name, engine, if_exists=if_exists, index=False)
-
-    except Exception as e:
-        # Check if this is an Oracle connection and try to handle thin mode errors
-        if 'oracle' in connection_url.lower():
-            if _handle_oracle_connection_error(connection_url, e):
-                # Retry the write after Oracle client initialization
-                engine = create_engine(connection_url)
-                if_exists = convert_sqlalchemy_mode(mode)
-
-                if batch_size and len(data) > batch_size:
-                    for i in range(0, len(data), batch_size):
-                        batch = data.iloc[i:i+batch_size]
-                        current_if_exists = if_exists if i == 0 else 'append'
-                        batch.to_sql(table_name, engine, if_exists=current_if_exists, index=False)
-                else:
-                    data.to_sql(table_name, engine, if_exists=if_exists, index=False)
-            else:
-                # Re-raise the original error
-                if isinstance(e, SQLAlchemyError):
-                    raise DatabaseError(f"Database error: {str(e)}")
-                else:
-                    raise CopyError(f"Error writing to database: {str(e)}")
-        else:
-            # Not an Oracle connection, re-raise the error
-            if isinstance(e, SQLAlchemyError):
-                raise DatabaseError(f"Database error: {str(e)}")
-            else:
-                raise CopyError(f"Error writing to database: {str(e)}")
+    # Use optimized streaming method
+    return write_to_db_streaming(
+        data=data,
+        connection_url=connection_url,
+        table_name=table_name,
+        mode=mode,
+        batch_size=batch_size,
+        use_optimized=use_streaming
+    )
 
 
 def check_table_exists(connection_url: str, table_name: str) -> bool:
@@ -513,7 +487,9 @@ def copy_file_to_db(
         connection_url = get_connection_url(target_env, target_encryption_key)
 
         # Read data from file
+        print(f"📂 Reading data from file: {file_path}")
         data = read_from_file(file_path, format_enum)
+        print(f"✓ Loaded {len(data):,} records from file")
 
         # Apply masking if needed
         if apply_masks:
@@ -524,13 +500,15 @@ def copy_file_to_db(
             validate_target_table(data, connection_url, table, create_if_not_exists)
 
         # Write to database
-        write_to_db(data, connection_url, table, mode_enum, batch_size)
+        print(f"📊 Writing data to table '{table}'...")
+        total_records = write_to_db(data, connection_url, table, mode_enum, batch_size)
+        print(f"✓ Successfully wrote {total_records:,} records")
 
-        message = f"Successfully copied {len(data)} records to table '{table}'"
+        message = f"Successfully copied {total_records} records to table '{table}'"
         if apply_masks:
             message += " (with masking applied)"
 
-        return create_success_result(message, record_count=len(data))
+        return create_success_result(message, record_count=total_records)
 
     except Exception as e:
         return handle_exception(e, "file to database copy")
@@ -595,21 +573,33 @@ def copy_db_to_db(
 
         # Execute query and write to target
         if batch_size:
-            # Handle batched results
+            # Handle batched results with progress reporting
             result = execute_query(source_url, query, batch_size, target_env if apply_masks else None, apply_masks)
 
             first_batch = True
             total_records = 0
+            batch_number = 0
+
+            print(f"📊 Starting batch copy (batch size: {batch_size})...")
+
             for chunk in result:
+                batch_number += 1
                 current_mode = mode_enum if first_batch else WriteMode.APPEND
-                write_to_db(chunk, target_url, table, current_mode)
-                total_records += len(chunk)
+
+                # Write batch using optimized streaming
+                records_written = write_to_db(chunk, target_url, table, current_mode)
+                total_records += records_written
+
+                # Print progress
+                print(f"✓ Batch {batch_number}: Copied {records_written:,} records | Total: {total_records:,} records")
+
                 first_batch = False
         else:
             # Handle single result
+            print(f"📊 Copying data in single batch...")
             result = execute_query(source_url, query, None, target_env if apply_masks else None, apply_masks)
-            write_to_db(result, target_url, table, mode_enum)
-            total_records = len(result)
+            total_records = write_to_db(result, target_url, table, mode_enum)
+            print(f"✓ Copied {total_records:,} records")
 
         message = f"Successfully copied {total_records} records to table '{table}'"
         if apply_masks:
