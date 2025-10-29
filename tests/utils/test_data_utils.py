@@ -110,7 +110,11 @@ def test_get_connection_url():
     # We need to patch the config.read and config.sections methods
     with patch('elm.elm_utils.db_utils.config.read'), \
          patch('elm.elm_utils.db_utils.config.sections') as mock_sections, \
-         patch.object(configparser.ConfigParser, '__getitem__') as mock_getitem:
+         patch.object(configparser.ConfigParser, '__getitem__') as mock_getitem, \
+         patch('elm.elm_utils.db_utils._get_mssql_driver_for_url') as mock_driver:
+
+        # Mock the MSSQL driver detection
+        mock_driver.return_value = 'ODBC Driver 17 for SQL Server'
 
         # Mock the sections to include our test environment
         mock_sections.return_value = ['test-pg', 'test-mysql', 'test-oracle', 'test-mssql', 'test-sqlite', 'test-encrypted']
@@ -193,7 +197,7 @@ def test_get_connection_url():
 
         # Test SQL Server connection
         mssql_url = get_connection_url('test-mssql')
-        assert mssql_url == 'mssql+pyodbc://sa:secret@localhost:1433/master?driver=ODBC+Driver+17+for+SQL+Server'
+        assert mssql_url == 'mssql+pyodbc://sa:secret@localhost:1433/master?driver=ODBC+Driver+17+for+SQL+Server&use_setinputsizes=False'
 
         # Test SQLite connection - SQLite is handled differently
         with patch('elm.elm_utils.db_utils.get_connection_url') as mock_get_url:

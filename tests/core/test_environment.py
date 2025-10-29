@@ -697,8 +697,9 @@ class TestGetConnectionUrl:
         expected = 'mysql+pymysql://root:mysql@mysqlserver:3306/testdb'
         assert url == expected
 
+    @patch('elm.core.environment._get_mssql_driver_for_url')
     @patch('elm.core.environment.load_environment_config')
-    def test_get_connection_url_mssql(self, mock_load):
+    def test_get_connection_url_mssql(self, mock_load, mock_driver):
         """Test getting connection URL for SQL Server."""
         mock_config = MagicMock()
         mock_config.sections.return_value = ['test-env']
@@ -712,10 +713,11 @@ class TestGetConnectionUrl:
             'is_encrypted': 'False'
         }
         mock_load.return_value = mock_config
+        mock_driver.return_value = 'ODBC Driver 17 for SQL Server'
 
         url = environment.get_connection_url('test-env')
 
-        expected = 'mssql+pyodbc://sa:password@sqlserver:1433/master?driver=ODBC+Driver+17+for+SQL+Server'
+        expected = 'mssql+pyodbc://sa:password@sqlserver:1433/master?driver=ODBC+Driver+17+for+SQL+Server&use_setinputsizes=False'
         assert url == expected
 
     @patch('elm.core.environment.load_environment_config')

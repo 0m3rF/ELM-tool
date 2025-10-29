@@ -2,7 +2,7 @@ import os, sys, subprocess, venv
 import configparser
 
 # Core dependencies that are always required
-CORE_PACKAGES = ["click", "platformdirs", "configparser", "sqlalchemy", "pandas", "cryptography"]
+CORE_PACKAGES = ["click", "platformdirs", "configparser", "sqlalchemy", "pandas", "cryptography", "faker"]
 
 # Database-specific dependencies
 DB_PACKAGES = {
@@ -16,7 +16,32 @@ def is_venv_active():
     return sys.prefix != sys.base_prefix
 
 def create_and_activate_venv(VENV_DIR):
-    """Create and activate a virtual environment, installing required dependencies"""
+    """
+    Create and activate a virtual environment, installing required dependencies.
+
+    This function now integrates with the config-based venv tracking system.
+    It delegates to the core venv management module for proper tracking.
+    """
+    try:
+        # Import here to avoid circular dependencies
+        from elm.core.config import get_config_manager
+        from elm.core import venv as core_venv
+
+        config_manager = get_config_manager()
+
+        # Use the new config-based venv management
+        result = core_venv.ensure_venv_ready(VENV_DIR, config_manager)
+
+        if not result.success:
+            print(f"⚠️  Warning: {result.message}")
+            # Fall back to legacy behavior if core venv management fails
+            _legacy_create_and_activate_venv(VENV_DIR)
+    except ImportError:
+        # If core modules aren't available, fall back to legacy behavior
+        _legacy_create_and_activate_venv(VENV_DIR)
+
+def _legacy_create_and_activate_venv(VENV_DIR):
+    """Legacy venv creation without config tracking (fallback)."""
     # Check if virtual environment exists
     if not os.path.exists(VENV_DIR):
         print(f"Creating virtual environment in {VENV_DIR}")

@@ -346,6 +346,47 @@ def write_mysql_executemany(
         raise DatabaseError(f"MySQL executemany error: {str(e)}")
 
 
+def _get_mssql_driver() -> str:
+    """
+    Detect and return the best available ODBC driver for SQL Server.
+
+    Returns:
+        Driver name string
+
+    Raises:
+        CopyError: If no suitable driver is found
+    """
+    try:
+        import pyodbc
+    except ImportError:
+        raise CopyError("pyodbc not installed. Install with: pip install pyodbc")
+
+    # List of drivers in order of preference
+    preferred_drivers = [
+        "ODBC Driver 18 for SQL Server",
+        "ODBC Driver 17 for SQL Server",
+        "ODBC Driver 13 for SQL Server",
+        "ODBC Driver 11 for SQL Server",
+        "SQL Server Native Client 11.0",
+        "SQL Server Native Client 10.0",
+        "SQL Server"
+    ]
+
+    available_drivers = pyodbc.drivers()
+
+    # Find the first available driver from our preferred list
+    for driver in preferred_drivers:
+        if driver in available_drivers:
+            return driver
+
+    # If no preferred driver found, raise an error
+    raise CopyError(
+        f"No suitable SQL Server ODBC driver found. "
+        f"Available drivers: {', '.join(available_drivers)}. "
+        f"Please install an ODBC driver for SQL Server."
+    )
+
+
 def write_mssql_fast_executemany(
     data: pd.DataFrame,
     connection_url: str,
@@ -372,8 +413,10 @@ def write_mssql_fast_executemany(
     # Parse connection URL
     parsed = urlparse(connection_url)
 
+    # Detect best available ODBC driver
+    driver = _get_mssql_driver()
+
     # Build ODBC connection string
-    driver = "ODBC Driver 17 for SQL Server"
     conn_str = (
         f"DRIVER={{{driver}}};"
         f"SERVER={parsed.hostname},{parsed.port or 1433};"
@@ -480,6 +523,69 @@ def write_to_db_streaming(
         return _write_pandas_fallback(data, connection_url, table_name, mode, batch_size)
 
 
+def _write_mssql_pandas_direct(
+    data: pd.DataFrame,
+    connection_url: str,
+    table_name: str,
+    mode: WriteMode = WriteMode.APPEND
+) -> int:
+    """
+    Write data to MSSQL using direct SQL to avoid NVARCHAR(max) issues with old drivers.
+
+    Args:
+        data: DataFrame to write
+        connection_url: Database connection URL
+        table_name: Target table name
+        mode: Write mode
+
+    Returns:
+        Number of records written
+    """
+    from sqlalchemy import text
+    from elm.core.copy import check_table_exists, _create_mssql_table_direct
+
+    engine = create_engine(connection_url)
+
+    # Check if table exists
+    table_exists = check_table_exists(connection_url, table_name)
+
+    # Handle different write modes
+    if mode == WriteMode.REPLACE:
+        if table_exists:
+            # Drop and recreate table
+            with engine.connect() as conn:
+                conn.execute(text(f"DROP TABLE [{table_name}]"))
+                conn.commit()
+        _create_mssql_table_direct(engine, table_name, data)
+    elif mode == WriteMode.FAIL and table_exists:
+        raise CopyError(f"Table {table_name} already exists")
+    elif not table_exists:
+        # Create table if it doesn't exist
+        _create_mssql_table_direct(engine, table_name, data)
+
+    # Insert data using raw pyodbc connection
+    if len(data) > 0:
+        columns = list(data.columns)
+        placeholders = ', '.join(['?' for _ in columns])
+        column_names = ', '.join([f'[{col}]' for col in columns])
+        insert_sql = f"INSERT INTO [{table_name}] ({column_names}) VALUES ({placeholders})"
+
+        # Convert DataFrame to list of tuples, handling None values
+        values = [tuple(None if pd.isna(val) else val for val in row) for row in data.values]
+
+        # Use raw connection to avoid SQLAlchemy parameter binding issues
+        raw_conn = engine.raw_connection()
+        try:
+            cursor = raw_conn.cursor()
+            cursor.executemany(insert_sql, values)
+            raw_conn.commit()
+            cursor.close()
+        finally:
+            raw_conn.close()
+
+    return len(data)
+
+
 def _write_pandas_fallback(
     data: pd.DataFrame,
     connection_url: str,
@@ -503,18 +609,34 @@ def _write_pandas_fallback(
     from elm.core.environment import _handle_oracle_connection_error
 
     try:
+        # For MSSQL, use direct SQL to avoid NVARCHAR(max) issues with old drivers
+        if 'mssql' in connection_url.lower():
+            return _write_mssql_pandas_direct(data, connection_url, table_name, mode)
+
         engine = create_engine(connection_url)
         if_exists = convert_sqlalchemy_mode(mode)
+
+        # For Oracle, use Oracle-specific type mapping
+        dtype_mapping = None
+        if 'oracle' in connection_url.lower():
+            from elm.core.copy import _get_oracle_dtype_mapping
+            dtype_mapping = _get_oracle_dtype_mapping(data)
 
         if batch_size and len(data) > batch_size:
             # Process in batches
             for i in range(0, len(data), batch_size):
                 batch = data.iloc[i:i+batch_size]
                 current_if_exists = if_exists if i == 0 else 'append'
-                batch.to_sql(table_name, engine, if_exists=current_if_exists, index=False)
+                if dtype_mapping:
+                    batch.to_sql(table_name, engine, if_exists=current_if_exists, index=False, dtype=dtype_mapping)
+                else:
+                    batch.to_sql(table_name, engine, if_exists=current_if_exists, index=False)
         else:
             # Process all at once
-            data.to_sql(table_name, engine, if_exists=if_exists, index=False)
+            if dtype_mapping:
+                data.to_sql(table_name, engine, if_exists=if_exists, index=False, dtype=dtype_mapping)
+            else:
+                data.to_sql(table_name, engine, if_exists=if_exists, index=False)
 
         return len(data)
 

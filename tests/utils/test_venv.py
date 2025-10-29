@@ -36,29 +36,35 @@ def test_is_venv_active():
 
 def test_create_and_activate_venv():
     """Test creating and activating a virtual environment."""
-    with patch('os.path.exists') as mock_exists, \
-         patch('venv.create') as mock_venv_create, \
-         patch('elm.elm_utils.venv.install_missing_dependencies') as mock_install:
+    # Mock the core venv module to test the new integration
+    with patch('elm.core.venv.ensure_venv_ready') as mock_ensure_venv, \
+         patch('elm.core.config.get_config_manager') as mock_get_config:
 
-        # Test when venv doesn't exist
-        mock_exists.return_value = False
+        # Mock config manager
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+
+        # Mock successful venv setup
+        from elm.core.types import OperationResult
+        mock_ensure_venv.return_value = OperationResult(
+            success=True,
+            message="Virtual environment is ready"
+        )
+
+        # Test venv creation
+        create_and_activate_venv('/path/to/venv')
+
+        # Verify core venv module was called
+        mock_ensure_venv.assert_called_once_with('/path/to/venv', mock_config)
+
+    # Test fallback to legacy behavior when core modules aren't available
+    with patch('elm.elm_utils.venv._legacy_create_and_activate_venv') as mock_legacy, \
+         patch('elm.core.venv.ensure_venv_ready', side_effect=ImportError):
 
         create_and_activate_venv('/path/to/venv')
 
-        # Verify venv was created and dependencies were installed
-        mock_venv_create.assert_called_once_with('/path/to/venv', with_pip=True)
-        mock_install.assert_called_once_with('/path/to/venv')
-
-        # Test when venv already exists
-        mock_exists.return_value = True
-        mock_venv_create.reset_mock()
-        mock_install.reset_mock()
-
-        create_and_activate_venv('/path/to/venv')
-
-        # Verify venv was not created but dependencies were still installed
-        mock_venv_create.assert_not_called()
-        mock_install.assert_called_once_with('/path/to/venv')
+        # Verify legacy function was called as fallback
+        mock_legacy.assert_called_once_with('/path/to/venv')
 
 
 def test_install_dependency():
@@ -404,18 +410,27 @@ def test_install_dependency_failure():
 
 def test_create_and_activate_venv_with_print():
     """Test creating virtual environment with print output."""
-    with patch('os.path.exists') as mock_exists, \
-         patch('venv.create') as mock_venv_create, \
-         patch('elm.elm_utils.venv.install_missing_dependencies') as mock_install, \
+    # Mock the core venv module to test the new integration with print output
+    with patch('elm.core.venv.ensure_venv_ready') as mock_ensure_venv, \
+         patch('elm.core.config.get_config_manager') as mock_get_config, \
          patch('builtins.print') as mock_print:
 
-        # Test when venv doesn't exist
-        mock_exists.return_value = False
+        # Mock config manager
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
 
+        # Mock successful venv setup
+        from elm.core.types import OperationResult
+        mock_ensure_venv.return_value = OperationResult(
+            success=True,
+            message="Virtual environment is ready"
+        )
+
+        # Test venv creation
         create_and_activate_venv('/path/to/venv')
 
-        # Verify print was called
-        mock_print.assert_called_once_with("Creating virtual environment in /path/to/venv")
+        # Verify core venv module was called (print is handled by core module)
+        mock_ensure_venv.assert_called_once_with('/path/to/venv', mock_config)
 
 
 def test_install_missing_dependencies_with_print():

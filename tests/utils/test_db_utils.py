@@ -111,8 +111,9 @@ class TestGetConnectionUrl:
         expected = 'mysql+pymysql://root:mysql@mysqlserver:3306/testdb'
         assert url == expected
 
+    @patch('elm.elm_utils.db_utils._get_mssql_driver_for_url')
     @patch('elm.elm_utils.db_utils.config')
-    def test_get_connection_url_mssql(self, mock_config):
+    def test_get_connection_url_mssql(self, mock_config, mock_driver):
         """Test getting connection URL for SQL Server."""
         mock_config.sections.return_value = ['test-env']
         mock_config.__getitem__.return_value = {
@@ -124,10 +125,11 @@ class TestGetConnectionUrl:
             'service': 'master',
             'is_encrypted': 'False'
         }
+        mock_driver.return_value = 'ODBC Driver 17 for SQL Server'
 
         url = db_utils.get_connection_url('test-env')
 
-        expected = 'mssql+pyodbc://sa:password@sqlserver:1433/master?driver=ODBC+Driver+17+for+SQL+Server'
+        expected = 'mssql+pyodbc://sa:password@sqlserver:1433/master?driver=ODBC+Driver+17+for+SQL+Server&use_setinputsizes=False'
         assert url == expected
 
     @patch('elm.elm_utils.db_utils.config')

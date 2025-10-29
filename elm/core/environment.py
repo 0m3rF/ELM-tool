@@ -543,6 +543,53 @@ def execute_sql(
         return handle_exception(e, "SQL execution")
 
 
+def _get_mssql_driver_for_url() -> str:
+    """
+    Detect and return the best available ODBC driver for SQL Server.
+
+    Returns:
+        Driver name string (not URL-encoded)
+
+    Raises:
+        ValidationError: If no suitable driver is found
+    """
+    try:
+        import pyodbc
+    except ImportError:
+        # If pyodbc is not installed, return a default driver
+        # The actual connection will fail later with a more specific error
+        return "ODBC Driver 17 for SQL Server"
+
+    # List of drivers in order of preference
+    preferred_drivers = [
+        "ODBC Driver 18 for SQL Server",
+        "ODBC Driver 17 for SQL Server",
+        "ODBC Driver 13 for SQL Server",
+        "ODBC Driver 11 for SQL Server",
+        "SQL Server Native Client 11.0",
+        "SQL Server Native Client 10.0",
+        "SQL Server"
+    ]
+
+    try:
+        available_drivers = pyodbc.drivers()
+
+        # Find the first available driver from our preferred list
+        for driver in preferred_drivers:
+            if driver in available_drivers:
+                return driver
+
+        # If no preferred driver found, use the first available driver
+        if available_drivers:
+            return available_drivers[0]
+    except Exception:
+        # If we can't get the driver list, return a default
+        pass
+
+    # Default fallback
+    return "ODBC Driver 17 for SQL Server"
+
+
 def get_connection_url(env_name: str, encryption_key: Optional[str] = None) -> str:
     """
     Get a SQLAlchemy connection URL for the specified environment.
@@ -609,6 +656,12 @@ def get_connection_url(env_name: str, encryption_key: Optional[str] = None) -> s
     elif env_type == "MYSQL":
         return f"mysql+pymysql://{user}:{password}@{host}:{port}/{service}"
     elif env_type == "MSSQL":
-        return f"mssql+pyodbc://{user}:{password}@{host}:{port}/{service}?driver=ODBC+Driver+17+for+SQL+Server"
+        # Dynamically detect available ODBC driver
+        from urllib.parse import quote_plus
+        driver = _get_mssql_driver_for_url()
+        driver_encoded = quote_plus(driver)
+        # Add connection parameters to handle legacy driver issues
+        # use_setinputsizes=False prevents NVARCHAR(max) parameter binding issues with older drivers
+        return f"mssql+pyodbc://{user}:{password}@{host}:{port}/{service}?driver={driver_encoded}&use_setinputsizes=False"
     else:
         raise ValidationError(f"Unsupported database type: {env_type}")
