@@ -38,9 +38,10 @@ class TestDatabaseConfig:
         config = DatabaseConfig(
             name="test-db",
             image="postgres:13",
-            port=5432,
+            target_port=5432,
             env_vars={"POSTGRES_DB": "testdb"},
             health_check_cmd=["pg_isready"],
+            default_port=5432,
             wait_time=30,
             startup_priority=1,
             depends_on=["redis"]
@@ -48,7 +49,8 @@ class TestDatabaseConfig:
 
         assert config.name == "test-db"
         assert config.image == "postgres:13"
-        assert config.port == 5432
+        assert config.target_port == 5432
+        assert config.default_port == 5432
         assert config.env_vars == {"POSTGRES_DB": "testdb"}
         assert config.health_check_cmd == ["pg_isready"]
         assert config.wait_time == 30
@@ -60,7 +62,7 @@ class TestDatabaseConfig:
         config = DatabaseConfig(
             name="test-db",
             image="postgres:13",
-            port=5432,
+            target_port=5432,
             env_vars={"POSTGRES_DB": "testdb"},
             health_check_cmd=["pg_isready"]
         )
@@ -69,6 +71,7 @@ class TestDatabaseConfig:
         assert config.wait_time == 30
         assert config.startup_priority == 0
         assert config.depends_on == []
+        assert config.default_port == 5432  # Should default to target_port
 
     def test_database_config_required_fields(self):
         """Test that required fields are enforced."""
@@ -76,7 +79,7 @@ class TestDatabaseConfig:
         config = DatabaseConfig(
             name="test-db",
             image="postgres:13",
-            port=5432,
+            target_port=5432,
             env_vars={},
             health_check_cmd=[]
         )
@@ -87,9 +90,10 @@ class TestDatabaseConfig:
         config = DatabaseConfig(
             name="test-db",
             image="postgres:13",
-            port=5432,
+            target_port=5432,
             env_vars={"KEY": "value"},
             health_check_cmd=["cmd"],
+            default_port=5432,
             wait_time=60,
             startup_priority=2,
             depends_on=["dep1", "dep2"]
@@ -97,12 +101,38 @@ class TestDatabaseConfig:
 
         assert isinstance(config.name, str)
         assert isinstance(config.image, str)
-        assert isinstance(config.port, int)
+        assert isinstance(config.target_port, int)
+        assert isinstance(config.default_port, int)
         assert isinstance(config.env_vars, dict)
         assert isinstance(config.health_check_cmd, list)
         assert isinstance(config.wait_time, int)
         assert isinstance(config.startup_priority, int)
         assert isinstance(config.depends_on, list)
+
+    def test_database_config_port_mapping(self):
+        """Test that default_port defaults to target_port when not specified."""
+        # Test with explicit default_port
+        config1 = DatabaseConfig(
+            name="test-db",
+            image="postgres:13",
+            target_port=5433,
+            env_vars={},
+            health_check_cmd=[],
+            default_port=5432
+        )
+        assert config1.target_port == 5433
+        assert config1.default_port == 5432
+
+        # Test with default_port defaulting to target_port
+        config2 = DatabaseConfig(
+            name="test-db",
+            image="postgres:13",
+            target_port=5433,
+            env_vars={},
+            health_check_cmd=[]
+        )
+        assert config2.target_port == 5433
+        assert config2.default_port == 5433  # Should default to target_port
 
 
 class TestContainerResult:
@@ -181,7 +211,7 @@ class TestModelsIntegration:
         config = DatabaseConfig(
             name="postgres-db",
             image="postgres:13",
-            port=5432,
+            target_port=5432,
             env_vars={"POSTGRES_DB": "testdb"},
             health_check_cmd=["pg_isready"],
             wait_time=45,

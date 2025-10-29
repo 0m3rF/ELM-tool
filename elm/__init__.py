@@ -10,7 +10,7 @@ This package provides tools for:
 It can be used both as a command-line tool and as a Python library.
 """
 
-__version__ = "0.0.10"
+__version__ = "0.0.11"
 
 # Import main API functions for easy access
 from elm.api import (

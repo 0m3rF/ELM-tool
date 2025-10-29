@@ -30,7 +30,8 @@ class ConfigManager:
         return {
             "ELM_TOOL_HOME": os.getenv("ELM_TOOL_HOME", default_home),
             "VENV_NAME": f"venv_{self.app_name}",
-            "APP_NAME": self.app_name
+            "APP_NAME": self.app_name,
+            "venv_initialized": False
         }
     
     def _get_config_file_path(self) -> str:
@@ -112,6 +113,34 @@ class ConfigManager:
         """Get the masking file path."""
         return os.path.join(self.get_elm_tool_home(), "masking.json")
 
+    def is_venv_initialized(self) -> bool:
+        """Check if the virtual environment has been initialized."""
+        return self.config.get("venv_initialized", False)
+
+    def mark_venv_initialized(self, initialized: bool = True) -> OperationResult:
+        """Mark the virtual environment as initialized or not initialized."""
+        try:
+            self.config["venv_initialized"] = initialized
+            self._save_config()
+            status = "initialized" if initialized else "not initialized"
+            return create_success_result(f"Virtual environment marked as {status}")
+        except Exception as e:
+            return create_error_result(f"Failed to update venv status: {str(e)}")
+
+    def check_venv_exists(self) -> bool:
+        """Check if the virtual environment directory exists."""
+        venv_dir = self.get_venv_dir()
+        if not os.path.exists(venv_dir):
+            return False
+
+        # Check if it's a valid venv by looking for the Python executable
+        if os.name == "nt":  # Windows
+            python_path = os.path.join(venv_dir, "Scripts", "python.exe")
+        else:  # Unix-like
+            python_path = os.path.join(venv_dir, "bin", "python")
+
+        return os.path.exists(python_path)
+
 
 # Global config manager instance
 _config_manager = None
@@ -145,11 +174,11 @@ def reset_config() -> OperationResult:
 
 
 def show_config_info() -> OperationResult:
-    """Show configuration information including file paths."""
+    """Show configuration information including file paths and venv status."""
     try:
         manager = get_config_manager()
         config = manager.get_config()
-        
+
         info = {
             "config": config,
             "paths": {
@@ -158,9 +187,13 @@ def show_config_info() -> OperationResult:
                 "venv_dir": manager.get_venv_dir(),
                 "environments_file": manager.get_envs_file(),
                 "masking_file": manager.get_mask_file()
+            },
+            "venv_status": {
+                "initialized": manager.is_venv_initialized(),
+                "exists": manager.check_venv_exists()
             }
         }
-        
+
         return create_success_result("Configuration information retrieved", data=info)
     except Exception as e:
         return create_error_result(f"Failed to get configuration info: {str(e)}")

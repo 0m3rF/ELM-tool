@@ -20,20 +20,21 @@ class DatabaseConfigs:
             "postgresql": DatabaseConfig(
                 name="ELM_TOOL_postgresql",
                 image="postgres:15-alpine",
-                port=5433,  # Updated to match running container port
+                target_port=5433,  # Host port
                 env_vars={
                     "POSTGRES_DB": "ELM_TOOL_db",
                     "POSTGRES_USER": "ELM_TOOL_user",
                     "POSTGRES_PASSWORD": POSTGRES_PASSWORD
                 },
                 health_check_cmd=["pg_isready", "-U", "ELM_TOOL_user", "-d", "ELM_TOOL_db"],
+                default_port=5432,  # Default PostgreSQL port inside container
                 wait_time=30,
                 startup_priority=1  # Start first (fastest to start)
             ),
             "mysql": DatabaseConfig(
                 name="ELM_TOOL_mysql",
                 image="mysql:8.0",
-                port=3307,  # Updated to match running container port
+                target_port=3307,  # Host port
                 env_vars={
                     "MYSQL_DATABASE": "ELM_TOOL_db",
                     "MYSQL_USER": "ELM_TOOL_user",
@@ -41,32 +42,38 @@ class DatabaseConfigs:
                     "MYSQL_ROOT_PASSWORD": MYSQL_ROOT_PASSWORD
                 },
                 health_check_cmd=["mysqladmin", "ping", "-h", "localhost"],
+                default_port=3306,  # Default MySQL port inside container
                 wait_time=45,
                 startup_priority=2  # Start second
             ),
             "mssql": DatabaseConfig(
                 name="ELM_TOOL_mssql",
                 image="mcr.microsoft.com/mssql/server:2022-latest",
-                port=1434,  # Updated to match running container port
+                target_port=1434,  # Host port
                 env_vars={
                     "ACCEPT_EULA": "Y",
                     "SA_PASSWORD": MSSQL_PASSWORD,
                     "MSSQL_PID": "Express"
                 },
                 health_check_cmd=["/opt/mssql-tools18/bin/sqlcmd", "-S", "localhost", "-U", "sa", "-P", MSSQL_PASSWORD, "-C", "-Q", "SELECT 1"],
+                default_port=1433,  # Default MSSQL port inside container
                 wait_time=60,
                 startup_priority=3  # Start third
             ),
             "oracle": DatabaseConfig(
                 name="ELM_TOOL_oracle",
                 image="gvenzl/oracle-xe:21-slim",
-                port=1522,  # Updated to match running container port
+                target_port=1522,  # Host port
                 env_vars={
                     "ORACLE_PASSWORD": ORACLE_PASSWORD,
                     "APP_USER": "ELM_TOOL_user",
                     "APP_USER_PASSWORD": ORACLE_PASSWORD
                 },
-                health_check_cmd=["sqlplus", "-s", f"ELM_TOOL_user/{ORACLE_PASSWORD}@localhost:1522/XE", "<<<", "SELECT 1 FROM DUAL;"],
+                health_check_cmd=["bash", "-c", f'''sqlplus -s ELM_TOOL_user/{ORACLE_PASSWORD}@localhost:1521/XEPDB1 <<EOF
+                                    SELECT 1 FROM DUAL;
+                                    EXIT;
+                                    EOF'''],
+                default_port=1521,  # Default Oracle port inside container
                 wait_time=90,
                 startup_priority=4  # Start last (slowest to start)
             )

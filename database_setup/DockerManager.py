@@ -212,7 +212,7 @@ After installation, log out and back in for group changes to take effect.
         cmd = [
             "docker", "run", "-d",
             "--name", config.name,
-            "-p", f"{config.port+1}:{config.port}"  # in case of there is already deployed db use next port.
+            "-p", f"{config.target_port}:{config.default_port}"  # Map host port to container port
         ]
 
         # Add environment variables

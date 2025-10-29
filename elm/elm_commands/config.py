@@ -62,14 +62,29 @@ def show():
     info = result.data
     config_data = info['config']
     paths = info['paths']
-    
+    venv_status = info.get('venv_status', {})
+
     click.echo("ELM Tool Configuration:")
     click.echo("=" * 50)
-    
+
     click.echo("\nConfiguration Values:")
     for key, value in config_data.items():
         click.echo(f"  {key}: {value}")
-    
+
+    click.echo("\nVirtual Environment Status:")
+    if venv_status:
+        initialized = venv_status.get('initialized', False)
+        exists = venv_status.get('exists', False)
+
+        init_status = "✓ Initialized" if initialized else "✗ Not initialized"
+        exists_status = "✓ Exists" if exists else "✗ Does not exist"
+
+        click.echo(f"  Status: {init_status}")
+        click.echo(f"  Directory: {exists_status}")
+
+        if not initialized or not exists:
+            click.echo("  ℹ️  Virtual environment will be created on next operation")
+
     click.echo("\nFile Paths:")
     for key, path in paths.items():
         click.echo(f"  {key}: {path}")
