@@ -21,25 +21,37 @@ from elm.elm_utils.mask_algorithms import MASKING_ALGORITHMS
 
 
 def load_masking_definitions() -> Dict[str, Any]:
-    """Load masking definitions from the masking file."""
+    """Load masking definitions from the masking file with file locking for parallel safety."""
+    from elm.elm_utils.file_lock import file_lock
+
     if not os.path.exists(variables.MASK_FILE):
         return {'global': {}, 'environments': {}}
-    
+
     try:
-        with open(variables.MASK_FILE, 'r') as f:
-            return json.load(f)
+        try:
+            with file_lock(variables.MASK_FILE, timeout=10.0):
+                with open(variables.MASK_FILE, 'r') as f:
+                    return json.load(f)
+        except TimeoutError:
+            # If we can't get the lock, try reading without it
+            # This is safe for reads in most cases
+            with open(variables.MASK_FILE, 'r') as f:
+                return json.load(f)
     except Exception as e:
         raise MaskingError(f"Error loading masking definitions: {str(e)}")
 
 
 def save_masking_definitions(definitions: Dict[str, Any]) -> None:
-    """Save masking definitions to the masking file."""
+    """Save masking definitions to the masking file with file locking for parallel safety."""
+    from elm.elm_utils.file_lock import file_lock
+
     # Create directory if it doesn't exist
     os.makedirs(os.path.dirname(variables.MASK_FILE), exist_ok=True)
-    
+
     try:
-        with open(variables.MASK_FILE, 'w') as f:
-            json.dump(definitions, f, indent=2)
+        with file_lock(variables.MASK_FILE, timeout=10.0):
+            with open(variables.MASK_FILE, 'w') as f:
+                json.dump(definitions, f, indent=2)
     except Exception as e:
         raise MaskingError(f"Error saving masking definitions: {str(e)}")
 

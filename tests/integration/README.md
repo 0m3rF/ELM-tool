@@ -19,10 +19,10 @@ The integration tests verify that ELM-tool can successfully copy data between al
 - Verifies basic functionality and schema compatibility
 - **12 test combinations**: 4 source databases × 3 destination databases
 
-#### Scenario B: Large Dataset Tests (500,000 rows)
-- Tests copying 500,000 rows of data between databases
+#### Scenario B: Large Dataset Tests (50,000 rows)
+- Tests copying 50,000 rows of data between databases
 - Verifies performance and batch processing
-- Tests timeout handling (25-second limit per pytest configuration)
+- Tests timeout handling (30-second limit per pytest configuration)
 - **12 test combinations**: 4 source databases × 3 destination databases
 
 ### Test Classes
@@ -31,8 +31,8 @@ The integration tests verify that ELM-tool can successfully copy data between al
    - `test_copy_5_rows_between_databases`: Parametrized test for all 12 combinations
    - Specific tests for key database pairs (PostgreSQL→MySQL, MySQL→MSSQL, etc.)
 
-2. **TestLargeDatasetCopy**: Tests with 500,000-row datasets
-   - `test_copy_500k_rows_between_databases`: Parametrized test for all 12 combinations
+2. **TestLargeDatasetCopy**: Tests with 50,000-row datasets
+   - `test_copy_50k_rows_between_databases`: Parametrized test for all 12 combinations
    - Specific tests for key database pairs with large datasets
    - Uses batch_size=10000 for efficient processing
 
@@ -149,16 +149,16 @@ pytest tests/integration/test_db_copy_integration.py --cov=elm.core.copy --cov-r
 pytest tests/integration/test_db_copy_integration.py::TestSmallDatasetCopy::test_copy_5_rows_between_databases[postgresql-mysql] -v
 
 # Run large dataset test for MySQL to MSSQL
-pytest tests/integration/test_db_copy_integration.py::TestLargeDatasetCopy::test_copy_500k_rows_between_databases[mysql-mssql] -v
+pytest tests/integration/test_db_copy_integration.py::TestLargeDatasetCopy::test_copy_50k_rows_between_databases[mysql-mssql] -v
 ```
 
 ## Test Execution Time
 
 - **Small dataset tests**: ~1-2 seconds per combination
-- **Large dataset tests**: ~15-20 seconds per combination
-- **Total execution time**: Approximately 5-10 minutes for all tests
+- **Large dataset tests**: ~5-10 seconds per combination
+- **Total execution time**: Approximately 2-5 minutes for all tests
 
-All tests are configured with a 25-second timeout to comply with pytest configuration.
+All tests are configured with a 30-second timeout to comply with pytest configuration.
 
 ## Test Data
 
@@ -167,8 +167,8 @@ Each database has 5 unique sample records with different data types:
 - Integers, strings, decimals, dates, booleans
 - Different column names and types per database
 
-### Large Dataset (500,000 rows)
-The 5 base records are replicated 100,000 times with unique IDs:
+### Large Dataset (50,000 rows)
+The 5 base records are replicated 10,000 times with unique IDs:
 - Tests batch processing capabilities
 - Verifies streaming performance
 - Ensures timeout handling works correctly
@@ -218,7 +218,7 @@ If tests timeout:
    - Modify `num_rows` parameter in test functions
    - Use smaller batch sizes
 
-2. Increase timeout in pytest.ini (current: 25 seconds)
+2. Increase timeout in pytest.ini (current: 30 seconds)
 
 3. Run tests individually instead of all at once
 

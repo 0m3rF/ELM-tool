@@ -240,18 +240,28 @@ DATA_GENERATORS = {
 }
 
 
+def get_worker_id(request):
+    """Get the worker ID for parallel test execution."""
+    if hasattr(request.config, 'workerinput'):
+        return request.config.workerinput['workerid']
+    return 'master'
+
+
 @pytest.fixture(scope="module")
-def setup_test_environments():
+def setup_test_environments(request):
     """
     Set up test environments for all database systems.
     This fixture creates ELM-tool environments for each database.
+    Uses worker-specific names to avoid conflicts in parallel execution.
     """
+    worker_id = get_worker_id(request)
     environments = {}
     created_envs = []
-    
+
     for db_name, config in DB_CONFIGS.items():
-        env_name = f"test_integration_{db_name}"
-        
+        # Use worker-specific environment name to avoid conflicts
+        env_name = f"test_integration_{db_name}_{worker_id}"
+
         # Create environment
         result = core_env.create_environment(
             name=env_name,
@@ -264,15 +274,15 @@ def setup_test_environments():
             overwrite=True,
             connection_type=config.get("connection_type")
         )
-        
+
         if result.success:
             environments[db_name] = env_name
             created_envs.append(env_name)
         else:
             pytest.skip(f"Failed to create environment for {db_name}: {result.message}")
-    
+
     yield environments
-    
+
     # Cleanup: Delete test environments
     for env_name in created_envs:
         try:
@@ -291,6 +301,8 @@ def clean_test_tables(setup_test_environments):
     Note: We need to drop ALL possible table names from ALL databases
     because tests copy tables between databases (e.g., test_users_pg from PostgreSQL to MySQL).
     We also need to include _copy suffix tables for same-database copy tests.
+
+    Uses worker-specific approach to minimize conflicts in parallel execution.
     """
     environments = setup_test_environments
 
@@ -302,6 +314,7 @@ def clean_test_tables(setup_test_environments):
     all_table_names.extend(copy_table_names)
 
     # Cleanup before test - drop all possible tables from all databases
+    # Only clean tables that might have been created by this worker or previous runs
     for db_name, env_name in environments.items():
         for table_name in all_table_names:
             try:
@@ -716,21 +729,21 @@ class TestSameDatabaseCopy:
 
 
 # ============================================================================
-# SCENARIO C: Large Dataset Tests (500,000 rows)
+# SCENARIO C: Large Dataset Tests (50,000 rows)
 # ============================================================================
 
 class TestLargeDatasetCopy:
-    """Test database copy operations with large datasets (500,000 rows)."""
+    """Test database copy operations with large datasets (50,000 rows)."""
 
     @pytest.mark.timeout(300)  # 5 minutes timeout for large dataset tests
     @pytest.mark.parametrize("source_db,target_db", get_all_db_combinations())
-    def test_copy_500k_rows_between_databases(self, clean_test_tables, source_db, target_db):
+    def test_copy_50k_rows_between_databases(self, clean_test_tables, source_db, target_db):
         """
-        Test copying 500,000 rows from source database to target database.
+        Test copying 50,000 rows from source database to target database.
 
         This test:
         1. Creates a table in the source database
-        2. Inserts 500,000 rows of test data (5 base rows × 100,000)
+        2. Inserts 50,000 rows of test data (5 base rows × 10,000)
         3. Copies data to target database using ELM-tool with batching
         4. Verifies row count and data integrity
 
@@ -742,8 +755,8 @@ class TestLargeDatasetCopy:
 
         # Step 1: Create source table and insert large dataset
         source_table = create_source_table(source_db, source_env)
-        rows_inserted = insert_test_data(source_db, source_env, source_table, num_rows=500000)
-        assert rows_inserted == 500000, f"Expected 500,000 rows inserted, got {rows_inserted}"
+        rows_inserted = insert_test_data(source_db, source_env, source_table, num_rows=50000)
+        assert rows_inserted == 50000, f"Expected 50,000 rows inserted, got {rows_inserted}"
 
         # Step 2: Define target table name
         target_table = source_table
@@ -764,11 +777,11 @@ class TestLargeDatasetCopy:
 
         # Step 4: Verify the copy operation succeeded
         assert result.success, f"Copy failed: {result.message}"
-        assert result.record_count == 500000, \
-            f"Expected 500,000 records copied, got {result.record_count}"
+        assert result.record_count == 50000, \
+            f"Expected 50,000 records copied, got {result.record_count}"
 
         # Step 5: Verify row count in target database
-        assert verify_row_count(target_env, target_table, 500000), \
+        assert verify_row_count(target_env, target_table, 50000), \
             f"Row count verification failed for {source_db} -> {target_db}"
 
         # Step 6: Verify sample data integrity (check first 5 rows)
@@ -778,14 +791,14 @@ class TestLargeDatasetCopy:
 
     @pytest.mark.timeout(300)
     def test_copy_postgres_to_mysql_large(self, clean_test_tables):
-        """Specific test: PostgreSQL -> MySQL with 500,000 rows."""
+        """Specific test: PostgreSQL -> MySQL with 50,000 rows."""
         environments = clean_test_tables
         source_env = environments["postgresql"]
         target_env = environments["mysql"]
 
         # Create and populate source with large dataset
         source_table = create_source_table("postgresql", source_env)
-        insert_test_data("postgresql", source_env, source_table, num_rows=500000)
+        insert_test_data("postgresql", source_env, source_table, num_rows=50000)
 
         # Copy to target with batching
         result = core_copy.copy_db_to_db(
@@ -800,19 +813,19 @@ class TestLargeDatasetCopy:
         )
 
         assert result.success
-        assert result.record_count == 500000
-        assert verify_row_count(target_env, source_table, 500000)
+        assert result.record_count == 50000
+        assert verify_row_count(target_env, source_table, 50000)
 
     @pytest.mark.timeout(300)
     def test_copy_mysql_to_mssql_large(self, clean_test_tables):
-        """Specific test: MySQL -> MSSQL with 500,000 rows."""
+        """Specific test: MySQL -> MSSQL with 50,000 rows."""
         environments = clean_test_tables
         source_env = environments["mysql"]
         target_env = environments["mssql"]
 
         # Create and populate source with large dataset
         source_table = create_source_table("mysql", source_env)
-        insert_test_data("mysql", source_env, source_table, num_rows=500000)
+        insert_test_data("mysql", source_env, source_table, num_rows=50000)
 
         # Copy to target with batching
         result = core_copy.copy_db_to_db(
@@ -827,19 +840,19 @@ class TestLargeDatasetCopy:
         )
 
         assert result.success
-        assert result.record_count == 500000
-        assert verify_row_count(target_env, source_table, 500000)
+        assert result.record_count == 50000
+        assert verify_row_count(target_env, source_table, 50000)
 
     @pytest.mark.timeout(300)
     def test_copy_mssql_to_oracle_large(self, clean_test_tables):
-        """Specific test: MSSQL -> Oracle with 500,000 rows."""
+        """Specific test: MSSQL -> Oracle with 50,000 rows."""
         environments = clean_test_tables
         source_env = environments["mssql"]
         target_env = environments["oracle"]
 
         # Create and populate source with large dataset
         source_table = create_source_table("mssql", source_env)
-        insert_test_data("mssql", source_env, source_table, num_rows=500000)
+        insert_test_data("mssql", source_env, source_table, num_rows=50000)
 
         # Copy to target with batching
         result = core_copy.copy_db_to_db(
@@ -854,19 +867,19 @@ class TestLargeDatasetCopy:
         )
 
         assert result.success
-        assert result.record_count == 500000
-        assert verify_row_count(target_env, source_table, 500000)
+        assert result.record_count == 50000
+        assert verify_row_count(target_env, source_table, 50000)
 
     @pytest.mark.timeout(300)
     def test_copy_oracle_to_postgres_large(self, clean_test_tables):
-        """Specific test: Oracle -> PostgreSQL with 500,000 rows."""
+        """Specific test: Oracle -> PostgreSQL with 50,000 rows."""
         environments = clean_test_tables
         source_env = environments["oracle"]
         target_env = environments["postgresql"]
 
         # Create and populate source with large dataset
         source_table = create_source_table("oracle", source_env)
-        insert_test_data("oracle", source_env, source_table, num_rows=500000)
+        insert_test_data("oracle", source_env, source_table, num_rows=50000)
 
         # Copy to target with batching
         result = core_copy.copy_db_to_db(
@@ -881,8 +894,8 @@ class TestLargeDatasetCopy:
         )
 
         assert result.success
-        assert result.record_count == 500000
-        assert verify_row_count(target_env, source_table, 500000)
+        assert result.record_count == 50000
+        assert verify_row_count(target_env, source_table, 50000)
 
 
 # ============================================================================

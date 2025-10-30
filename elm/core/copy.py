@@ -45,22 +45,51 @@ def execute_query(
     Returns:
         DataFrame or iterator of DataFrames (if batched)
     """
-    try:
-        engine = create_engine(connection_url)
-
-        if batch_size:
-            # For batched queries, we need to keep the connection open while iterating
-            # Create a generator that manages the connection lifecycle
-            def batched_query_generator():
-                with engine.connect() as connection:
+    def _create_batched_generator(eng):
+        """Helper function to create a batched query generator."""
+        def batched_query_generator():
+            try:
+                with eng.connect() as connection:
                     result = pd.read_sql_query(query, connection, chunksize=batch_size)
                     for batch in result:
                         if apply_masks:
                             yield apply_masking(batch, environment)
                         else:
                             yield batch
+            except Exception as e:
+                # Handle Oracle errors that occur during iteration
+                if 'oracle' in connection_url.lower():
+                    if _handle_oracle_connection_error(connection_url, e):
+                        # Retry with a new engine
+                        retry_engine = create_engine(connection_url)
+                        with retry_engine.connect() as connection:
+                            result = pd.read_sql_query(query, connection, chunksize=batch_size)
+                            for batch in result:
+                                if apply_masks:
+                                    yield apply_masking(batch, environment)
+                                else:
+                                    yield batch
+                    else:
+                        # Re-raise the original error
+                        if isinstance(e, SQLAlchemyError):
+                            raise DatabaseError(f"Database error: {str(e)}")
+                        else:
+                            raise CopyError(f"Error executing query: {str(e)}")
+                else:
+                    # Not an Oracle connection, re-raise the error
+                    if isinstance(e, SQLAlchemyError):
+                        raise DatabaseError(f"Database error: {str(e)}")
+                    else:
+                        raise CopyError(f"Error executing query: {str(e)}")
 
-            return batched_query_generator()
+        return batched_query_generator()
+
+    try:
+        engine = create_engine(connection_url)
+
+        if batch_size:
+            # For batched queries, return a generator that handles errors internally
+            return _create_batched_generator(engine)
         else:
             # For non-batched queries, we can use a simple context manager
             with engine.connect() as connection:
@@ -79,17 +108,8 @@ def execute_query(
                 engine = create_engine(connection_url)
 
                 if batch_size:
-                    # For batched queries, keep connection open while iterating
-                    def batched_query_generator():
-                        with engine.connect() as connection:
-                            result = pd.read_sql_query(query, connection, chunksize=batch_size)
-                            for batch in result:
-                                if apply_masks:
-                                    yield apply_masking(batch, environment)
-                                else:
-                                    yield batch
-
-                    return batched_query_generator()
+                    # For batched queries, return a generator
+                    return _create_batched_generator(engine)
                 else:
                     with engine.connect() as connection:
                         result = pd.read_sql_query(query, connection)
