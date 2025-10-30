@@ -63,7 +63,7 @@ Examples:
     parser.add_argument(
         '--large',
         action='store_true',
-        help='Run large dataset tests only (500,000 rows)'
+        help='Run large dataset tests only (50,000 rows)'
     )
     
     parser.add_argument(
@@ -161,7 +161,7 @@ Examples:
     elif args.large:
         test_path = '::TestLargeDatasetCopy'
         cmd = base_cmd + [test_path]
-        return run_command(cmd, "Large Dataset Tests (500,000 rows)")
+        return run_command(cmd, "Large Dataset Tests (50,000 rows)")
     
     elif args.integrity:
         test_path = '::TestDataIntegrity'

@@ -894,39 +894,49 @@ class TestCopyEdgeCases:
         """Test Oracle error handling with batching and successful retry."""
         with patch('elm.core.copy.create_engine') as mock_create_engine, \
              patch('elm.core.copy._handle_oracle_connection_error') as mock_handle_error, \
-             patch('elm.core.copy.apply_masking') as mock_apply_masking:
+             patch('elm.core.copy.apply_masking') as mock_apply_masking, \
+             patch('pandas.read_sql_query') as mock_read_sql:
 
-            # First call raises Oracle error
+            # Mock batched query result
+            test_df1 = pd.DataFrame({'id': [1], 'name': ['Alice']})
+            test_df2 = pd.DataFrame({'id': [2], 'name': ['Bob']})
+
+            # First call to create_engine - will raise Oracle error when read_sql_query is called
             mock_engine_first = MagicMock()
             mock_connection_first = MagicMock()
-            mock_connection_first.execute.side_effect = Exception("thin mode not supported")
             mock_engine_first.connect.return_value.__enter__.return_value = mock_connection_first
 
-            # Second call succeeds
+            # Second call to create_engine - will succeed
             mock_engine_second = MagicMock()
             mock_connection_second = MagicMock()
             mock_engine_second.connect.return_value.__enter__.return_value = mock_connection_second
 
             mock_create_engine.side_effect = [mock_engine_first, mock_engine_second]
+
+            # First call to read_sql_query raises Oracle error, second call succeeds
+            mock_read_sql.side_effect = [
+                Exception("DPY-3015: password verifier type 0x939 is not supported"),
+                iter([test_df1, test_df2])
+            ]
+
             mock_handle_error.return_value = True  # Indicates successful retry
 
-            # Mock batched query result
-            test_df1 = pd.DataFrame({'id': [1], 'name': ['Alice']})
-            test_df2 = pd.DataFrame({'id': [2], 'name': ['Bob']})
-            mock_apply_masking.side_effect = [test_df1, test_df2]
+            # Mock apply_masking to return the input dataframe (identity function)
+            mock_apply_masking.side_effect = lambda df, env: df
 
-            with patch('pandas.read_sql_query', return_value=iter([test_df1, test_df2])):
-                result = copy.execute_query(
-                    'oracle+oracledb://user:pass@host:1521?service_name=service',
-                    'SELECT * FROM test_table',
-                    batch_size=1,
-                    environment='test-env',
-                    apply_masks=True
-                )
+            result = copy.execute_query(
+                'oracle+oracledb://user:pass@host:1521?service_name=service',
+                'SELECT * FROM test_table',
+                batch_size=1,
+                environment='test-env',
+                apply_masks=True
+            )
 
             # Result should be a generator
             batches = list(result)
             assert len(batches) == 2
+            assert batches[0].equals(test_df1)
+            assert batches[1].equals(test_df2)
 
     def test_execute_query_oracle_error_handling_failed_retry(self):
         """Test Oracle error handling with failed retry."""

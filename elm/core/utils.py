@@ -73,20 +73,31 @@ def ensure_directory_exists(file_path: str) -> None:
 
 
 def load_environment_config() -> configparser.ConfigParser:
-    """Load environment configuration from file."""
+    """Load environment configuration from file with file locking for parallel safety."""
+    from elm.elm_utils.file_lock import file_lock
+
     config = configparser.ConfigParser()
     if os.path.exists(variables.ENVS_FILE):
-        config.read(variables.ENVS_FILE)
+        try:
+            with file_lock(variables.ENVS_FILE, timeout=10.0):
+                config.read(variables.ENVS_FILE)
+        except TimeoutError:
+            # If we can't get the lock, try reading without it
+            # This is safe for reads in most cases
+            config.read(variables.ENVS_FILE)
     return config
 
 
 def save_environment_config(config: configparser.ConfigParser) -> None:
-    """Save environment configuration to file."""
+    """Save environment configuration to file with file locking for parallel safety."""
+    from elm.elm_utils.file_lock import file_lock
+
     # Ensure directory exists
     os.makedirs(os.path.dirname(variables.ENVS_FILE), exist_ok=True)
-    
-    with open(variables.ENVS_FILE, 'w') as f:
-        config.write(f)
+
+    with file_lock(variables.ENVS_FILE, timeout=10.0):
+        with open(variables.ENVS_FILE, 'w') as f:
+            config.write(f)
 
 
 def create_success_result(message: str, data: Any = None, record_count: int = None) -> OperationResult:

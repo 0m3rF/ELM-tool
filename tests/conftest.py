@@ -5,9 +5,53 @@ import datetime
 from unittest.mock import MagicMock
 
 
+def get_worker_id(request):
+    """Get the worker ID for parallel test execution.
+
+    Returns:
+        str: Worker ID (e.g., 'gw0', 'gw1') or 'master' for non-parallel execution
+    """
+    if hasattr(request.config, 'workerinput'):
+        return request.config.workerinput['workerid']
+    return 'master'
+
+
+@pytest.fixture
+def worker_id(request):
+    """Fixture that provides the worker ID for the current test."""
+    return get_worker_id(request)
+
+
 @pytest.fixture
 def temp_env_dir():
     return variables.ENVS_FILE
+
+
+@pytest.fixture
+def unique_env_name(request):
+    """Generate a unique environment name for parallel test execution.
+
+    This fixture ensures that each test worker gets a unique environment name
+    to avoid conflicts when running tests in parallel.
+    """
+    worker = get_worker_id(request)
+    test_name = request.node.name
+    # Create a unique name combining worker ID and test name
+    return f"test_env_{worker}_{test_name}"[:50]  # Limit length
+
+
+@pytest.fixture
+def unique_table_name(request):
+    """Generate a unique table name for parallel test execution.
+
+    This fixture ensures that each test worker gets a unique table name
+    to avoid conflicts when running tests in parallel.
+    """
+    worker = get_worker_id(request)
+    test_name = request.node.name
+    # Create a unique name combining worker ID and test name
+    return f"test_table_{worker}_{test_name}"[:50]  # Limit length
+
 
 @pytest.fixture
 def sample_dataframe():
