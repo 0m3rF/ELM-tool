@@ -6,11 +6,37 @@ These utilities provide common functionality for validation, conversion, and err
 """
 
 import os
+import sys
 import configparser
 from typing import List, Dict, Any, Optional
 from elm.core.types import DatabaseType, WriteMode, FileFormat, MaskingAlgorithm, OperationResult
 from elm.core.exceptions import ValidationError, ELMError
 from elm.elm_utils import variables
+
+
+def safe_print(message: str) -> None:
+    """
+    Safely print messages with Unicode characters (including emojis) to console.
+
+    This function handles encoding issues on Windows where the default console
+    encoding (cp1252/charmap) cannot handle Unicode emojis and special characters.
+
+    Args:
+        message: Message to print (can contain Unicode characters and emojis)
+    """
+    try:
+        # Try to print normally first
+        print(message)
+    except UnicodeEncodeError:
+        # If that fails, encode to UTF-8 and write to stdout buffer
+        try:
+            # Write to stdout buffer with UTF-8 encoding
+            sys.stdout.buffer.write((message + '\n').encode('utf-8'))
+            sys.stdout.buffer.flush()
+        except Exception:
+            # Last resort: replace problematic characters
+            safe_message = message.encode('ascii', errors='replace').decode('ascii')
+            print(safe_message)
 
 
 def validate_database_type(db_type: str) -> DatabaseType:

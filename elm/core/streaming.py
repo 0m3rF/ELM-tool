@@ -14,7 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from elm.core.types import WriteMode
 from elm.core.exceptions import DatabaseError, CopyError
-from elm.core.utils import convert_sqlalchemy_mode
+from elm.core.utils import convert_sqlalchemy_mode, safe_print
 
 
 def detect_database_type(connection_url: str) -> str:
@@ -99,25 +99,27 @@ def write_postgresql_copy(
     }
     
     try:
+        # Set client encoding to UTF-8 to handle all Unicode characters
+        conn_params['client_encoding'] = 'UTF8'
         conn = psycopg2.connect(**conn_params)
         cursor = conn.cursor()
-        
+
         # Handle mode
         if mode == WriteMode.REPLACE:
             cursor.execute(sql.SQL("TRUNCATE TABLE {}").format(sql.Identifier(table_name)))
-        
-        # Create CSV buffer
+
+        # Create CSV buffer (StringIO handles Unicode natively in Python 3)
         buffer = io.StringIO()
         data.to_csv(buffer, index=False, header=False)
         buffer.seek(0)
-        
+
         # Use COPY for bulk insert
         columns = list(data.columns)
-        copy_sql = sql.SQL("COPY {} ({}) FROM STDIN WITH CSV").format(
+        copy_sql = sql.SQL("COPY {} ({}) FROM STDIN WITH CSV ENCODING 'UTF8'").format(
             sql.Identifier(table_name),
             sql.SQL(', ').join(map(sql.Identifier, columns))
         )
-        
+
         cursor.copy_expert(copy_sql, buffer)
         conn.commit()
         
@@ -169,23 +171,25 @@ def write_postgresql_executemany(
     }
     
     try:
+        # Set client encoding to UTF-8 to handle all Unicode characters
+        conn_params['client_encoding'] = 'UTF8'
         conn = psycopg2.connect(**conn_params)
         cursor = conn.cursor()
-        
+
         # Handle mode
         if mode == WriteMode.REPLACE:
             cursor.execute(sql.SQL("TRUNCATE TABLE {}").format(sql.Identifier(table_name)))
-        
+
         # Prepare data
         columns = list(data.columns)
         values = [tuple(row) for row in data.values]
-        
+
         # Build INSERT statement
         insert_sql = sql.SQL("INSERT INTO {} ({}) VALUES %s").format(
             sql.Identifier(table_name),
             sql.SQL(', ').join(map(sql.Identifier, columns))
         )
-        
+
         # Execute bulk insert
         execute_values(cursor, insert_sql, values, page_size=1000)
         conn.commit()
@@ -242,21 +246,22 @@ def write_oracle_executemany(
         dsn = oracledb.makedsn(host, port, sid=sid)
     
     try:
-        conn = oracledb.connect(user=user, password=password, dsn=dsn)
+        # Connect with UTF-8 encoding to handle all Unicode characters including emojis
+        conn = oracledb.connect(user=user, password=password, dsn=dsn, encoding="UTF-8", nencoding="UTF-8")
         cursor = conn.cursor()
-        
+
         # Handle mode
         if mode == WriteMode.REPLACE:
             cursor.execute(f"TRUNCATE TABLE {table_name}")
-        
+
         # Prepare data
         columns = list(data.columns)
         values = [tuple(row) for row in data.values]
-        
+
         # Build INSERT statement with bind variables
         placeholders = ', '.join([f':{i+1}' for i in range(len(columns))])
         insert_sql = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({placeholders})"
-        
+
         # Execute bulk insert with array binding
         cursor.executemany(insert_sql, values, batcherrors=True)
         
@@ -316,21 +321,23 @@ def write_mysql_executemany(
     }
     
     try:
+        # Set charset to UTF-8 to handle all Unicode characters
+        conn_params['charset'] = 'utf8mb4'
         conn = pymysql.connect(**conn_params)
         cursor = conn.cursor()
-        
+
         # Handle mode
         if mode == WriteMode.REPLACE:
             cursor.execute(f"TRUNCATE TABLE {table_name}")
-        
+
         # Prepare data
         columns = list(data.columns)
         values = [tuple(row) for row in data.values]
-        
+
         # Build INSERT statement
         placeholders = ', '.join(['%s'] * len(columns))
         insert_sql = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({placeholders})"
-        
+
         # Execute bulk insert
         cursor.executemany(insert_sql, values)
         conn.commit()
@@ -416,17 +423,23 @@ def write_mssql_fast_executemany(
     # Detect best available ODBC driver
     driver = _get_mssql_driver()
 
-    # Build ODBC connection string
+    # Build ODBC connection string with UTF-8 encoding
     conn_str = (
         f"DRIVER={{{driver}}};"
         f"SERVER={parsed.hostname},{parsed.port or 1433};"
         f"DATABASE={parsed.path.lstrip('/')};"
         f"UID={parsed.username};"
-        f"PWD={parsed.password}"
+        f"PWD={parsed.password};"
+        f"CharacterSet=UTF-8"
     )
 
     try:
-        conn = pyodbc.connect(conn_str)
+        # Connect with autocommit=False and set encoding
+        conn = pyodbc.connect(conn_str, autocommit=False)
+        # Set connection to use UTF-8 encoding
+        conn.setdecoding(pyodbc.SQL_CHAR, encoding='utf-8')
+        conn.setdecoding(pyodbc.SQL_WCHAR, encoding='utf-8')
+        conn.setencoding(encoding='utf-8')
         cursor = conn.cursor()
 
         # Enable fast_executemany for bulk operations
@@ -519,7 +532,7 @@ def write_to_db_streaming(
 
     except Exception as e:
         # If optimized method fails, fall back to pandas
-        print(f"⚠ Optimized write failed ({str(e)}), falling back to pandas to_sql...")
+        safe_print(f"⚠ Optimized write failed ({str(e)}), falling back to pandas to_sql...")
         return _write_pandas_fallback(data, connection_url, table_name, mode, batch_size)
 
 
