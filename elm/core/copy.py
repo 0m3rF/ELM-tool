@@ -18,7 +18,7 @@ from elm.core.exceptions import CopyError, ValidationError, DatabaseError, FileE
 from elm.core.utils import (
     validate_write_mode, validate_file_format, ensure_directory_exists,
     create_success_result, create_error_result, handle_exception,
-    validate_required_params, convert_sqlalchemy_mode
+    validate_required_params, convert_sqlalchemy_mode, safe_print
 )
 from elm.core.environment import get_connection_url, _initialize_oracle_client, _handle_oracle_connection_error
 from elm.core.masking import apply_masking
@@ -150,37 +150,38 @@ def write_to_file(
         ensure_directory_exists(file_path)
         
         if file_format == FileFormat.CSV:
-            # For CSV, handle append mode specially
+            # For CSV, handle append mode specially with UTF-8 encoding
             if mode == 'a' and os.path.exists(file_path):
                 # Append without header
-                data.to_csv(file_path, mode='a', header=False, index=False)
+                data.to_csv(file_path, mode='a', header=False, index=False, encoding='utf-8')
             else:
                 # Write with header
-                data.to_csv(file_path, index=False)
+                data.to_csv(file_path, index=False, encoding='utf-8')
         elif file_format == FileFormat.JSON:
             if mode == 'a' and os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-                # Append to existing JSON
+                # Append to existing JSON with UTF-8 encoding
                 try:
-                    with open(file_path, 'r') as f:
+                    with open(file_path, 'r', encoding='utf-8') as f:
                         existing_data = json.load(f)
-                    
+
                     # Convert DataFrame to list of dicts
                     new_records = data.to_dict('records')
-                    
+
                     # Append new records
                     if isinstance(existing_data, list):
                         existing_data.extend(new_records)
                     else:
                         existing_data = [existing_data] + new_records
-                    
-                    # Write back
-                    with open(file_path, 'w') as f:
-                        json.dump(existing_data, f, indent=2)
+
+                    # Write back with UTF-8 encoding and ensure_ascii=False to preserve Unicode
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        json.dump(existing_data, f, indent=2, ensure_ascii=False)
                 except Exception as e:
                     raise FileError(f"Error appending to JSON: {str(e)}")
             else:
-                # Write new JSON file
-                data.to_json(file_path, orient='records', indent=2)
+                # Write new JSON file with UTF-8 encoding and ensure_ascii=False
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    data.to_json(f, orient='records', indent=2, force_ascii=False)
         else:
             raise ValidationError(f"Unsupported file format: {file_format}")
             
@@ -193,22 +194,24 @@ def write_to_file(
 def read_from_file(file_path: str, file_format: FileFormat = FileFormat.CSV) -> pd.DataFrame:
     """
     Read data from a file in the specified format.
-    
+
     Args:
         file_path: Input file path
         file_format: File format (CSV or JSON)
-    
+
     Returns:
         DataFrame with file contents
     """
     if not os.path.exists(file_path):
         raise FileError(f"File not found: {file_path}")
-    
+
     try:
         if file_format == FileFormat.CSV:
-            return pd.read_csv(file_path)
+            # Read CSV with UTF-8 encoding
+            return pd.read_csv(file_path, encoding='utf-8')
         elif file_format == FileFormat.JSON:
-            return pd.read_json(file_path, orient='records')
+            # Read JSON with UTF-8 encoding
+            return pd.read_json(file_path, orient='records', encoding='utf-8')
         else:
             raise ValidationError(f"Unsupported file format: {file_format}")
     except Exception as e:
@@ -634,9 +637,9 @@ def copy_file_to_db(
         connection_url = get_connection_url(target_env, target_encryption_key)
 
         # Read data from file
-        print(f"📂 Reading data from file: {file_path}")
+        safe_print(f"📂 Reading data from file: {file_path}")
         data = read_from_file(file_path, format_enum)
-        print(f"✓ Loaded {len(data):,} records from file")
+        safe_print(f"✓ Loaded {len(data):,} records from file")
 
         # Apply masking if needed
         if apply_masks:
@@ -647,9 +650,9 @@ def copy_file_to_db(
             validate_target_table(data, connection_url, table, create_if_not_exists)
 
         # Write to database
-        print(f"📊 Writing data to table '{table}'...")
+        safe_print(f"📊 Writing data to table '{table}'...")
         total_records = write_to_db(data, connection_url, table, mode_enum, batch_size)
-        print(f"✓ Successfully wrote {total_records:,} records")
+        safe_print(f"✓ Successfully wrote {total_records:,} records")
 
         message = f"Successfully copied {total_records} records to table '{table}'"
         if apply_masks:
@@ -743,7 +746,7 @@ def copy_db_to_db(
             total_records = 0
             batch_number = 0
 
-            print(f"📊 Starting batch copy (batch size: {batch_size})...")
+            safe_print(f"📊 Starting batch copy (batch size: {batch_size})...")
 
             for chunk in result:
                 batch_number += 1
@@ -754,15 +757,15 @@ def copy_db_to_db(
                 total_records += records_written
 
                 # Print progress
-                print(f"✓ Batch {batch_number}: Copied {records_written:,} records | Total: {total_records:,} records")
+                safe_print(f"✓ Batch {batch_number}: Copied {records_written:,} records | Total: {total_records:,} records")
 
                 first_batch = False
         else:
             # Handle single result
-            print(f"📊 Copying data in single batch...")
+            safe_print(f"📊 Copying data in single batch...")
             result = execute_query(source_url, query, None, target_env if apply_masks else None, apply_masks)
             total_records = write_to_db(result, target_url, table, mode_enum)
-            print(f"✓ Copied {total_records:,} records")
+            safe_print(f"✓ Copied {total_records:,} records")
 
         message = f"Successfully copied {total_records} records to table '{table}'"
         if apply_masks:
