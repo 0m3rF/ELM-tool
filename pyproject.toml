@@ -1,6 +1,6 @@
 [project]
 name = "elm-tool"
-version = "0.0.13"
+version = "0.0.14"
 description = "Extract, Load and Mask Tool for Database Operations"
 authors = [{name = "Ömer Faruk Kırlı", email = "omerfarukkirli@gmail.com"}]
 readme = "README.md"

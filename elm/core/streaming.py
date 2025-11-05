@@ -246,8 +246,10 @@ def write_oracle_executemany(
         dsn = oracledb.makedsn(host, port, sid=sid)
     
     try:
-        # Connect with UTF-8 encoding to handle all Unicode characters including emojis
-        conn = oracledb.connect(user=user, password=password, dsn=dsn, encoding="UTF-8", nencoding="UTF-8")
+        # Connect to Oracle database
+        # Note: encoding parameters are only valid for init_oracle_client() in thick mode,
+        # not for connect(). The driver handles encoding automatically.
+        conn = oracledb.connect(user=user, password=password, dsn=dsn)
         cursor = conn.cursor()
 
         # Handle mode
@@ -661,13 +663,17 @@ def _write_pandas_fallback(
                 engine = create_engine(connection_url)
                 if_exists = convert_sqlalchemy_mode(mode)
 
+                # Get Oracle-specific type mapping for retry
+                from elm.core.copy import _get_oracle_dtype_mapping
+                dtype_mapping = _get_oracle_dtype_mapping(data)
+
                 if batch_size and len(data) > batch_size:
                     for i in range(0, len(data), batch_size):
                         batch = data.iloc[i:i+batch_size]
                         current_if_exists = if_exists if i == 0 else 'append'
-                        batch.to_sql(table_name, engine, if_exists=current_if_exists, index=False)
+                        batch.to_sql(table_name, engine, if_exists=current_if_exists, index=False, dtype=dtype_mapping)
                 else:
-                    data.to_sql(table_name, engine, if_exists=if_exists, index=False)
+                    data.to_sql(table_name, engine, if_exists=if_exists, index=False, dtype=dtype_mapping)
 
                 return len(data)
             else:
