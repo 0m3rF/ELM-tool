@@ -197,6 +197,92 @@ class TestOracleStreaming:
             # Should fall back to pandas if oracledb not available
             assert result == 3
 
+    def test_oracle_nan_nat_converted_to_none(self):
+        """Ensure NaN/NaT values are sent to Oracle as None (NULL)."""
+        from elm.core.streaming import write_oracle_executemany
+        from elm.core.types import WriteMode
+
+        data = pd.DataFrame({
+            'id': [1, 2],
+            'created_date': [pd.Timestamp('2025-09-11 15:37:51'), pd.NaT],
+            'row_count': [123, float('nan')],
+        })
+
+        captured = {}
+
+        class FakeCursor:
+            def __init__(self):
+                self.executemany_args = None
+
+            def execute(self, sql):
+                # TRUNCATE not used in APPEND mode, but keep for completeness
+                pass
+
+            def executemany(self, sql, seq, batcherrors=False):
+                # Materialize the sequence so we can inspect it later
+                self.executemany_args = (sql, list(seq), batcherrors)
+
+            def getbatcherrors(self):
+                # Simulate no batch errors
+                return []
+
+            def close(self):
+                pass
+
+        class FakeConnection:
+            def __init__(self):
+                self._cursor = FakeCursor()
+
+            def cursor(self):
+                captured['cursor'] = self._cursor
+                return self._cursor
+
+            def commit(self):
+                pass
+
+            def close(self):
+                pass
+
+        def fake_connect(user, password, dsn):
+            return FakeConnection()
+
+        def fake_makedsn(host, port, service_name=None, sid=None):
+            return "DSN"
+
+        import types
+        fake_oracledb = types.SimpleNamespace(
+            connect=fake_connect,
+            makedsn=fake_makedsn,
+        )
+
+        # Patch builtins.__import__ so that "import oracledb" inside the
+        # streaming module returns our fake module.
+        import builtins
+        real_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == 'oracledb':
+                return fake_oracledb
+            return real_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=mock_import):
+            written = write_oracle_executemany(
+                data=data,
+                connection_url="oracle+oracledb://user:pass@localhost:1521/db",
+                table_name="test_table",
+                mode=WriteMode.APPEND,
+            )
+
+        # Should report the correct number of written rows
+        assert written == len(data)
+
+        # Inspect the values passed to executemany
+        sql, seq, batcherrors = captured['cursor'].executemany_args
+        # Second row should have None for both the datetime and numeric fields
+        second_row = seq[1]
+        assert second_row[1] is None  # created_date (NaT) -> None
+        assert second_row[2] is None  # row_count (NaN) -> None
+
 
 class TestMySQLStreaming:
     """Test MySQL-specific streaming operations"""
