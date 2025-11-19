@@ -258,7 +258,11 @@ def write_oracle_executemany(
 
         # Prepare data
         columns = list(data.columns)
-        values = [tuple(row) for row in data.values]
+        # Convert pandas NaN/NaT values to None so Oracle treats them as NULL
+        values = [
+            tuple(None if pd.isna(val) else val for val in row)
+            for row in data.values
+        ]
 
         # Build INSERT statement with bind variables
         placeholders = ', '.join([f':{i+1}' for i in range(len(columns))])
