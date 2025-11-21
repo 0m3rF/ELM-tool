@@ -7,6 +7,8 @@ This module provides consistent data copying functionality between databases and
 
 import os
 import json
+import time
+from datetime import datetime
 import pandas as pd
 import concurrent.futures
 from typing import Optional, List, Dict, Any, Union, Iterator
@@ -495,27 +497,45 @@ def validate_target_table(
 
 
 def process_in_parallel(func, items: List[Any], max_workers: int) -> List[Any]:
-    """
-    Process items in parallel using the provided function.
-    
+    """Process items in parallel using the provided function.
+
+    This helper preserves the order of ``items`` in the returned list and
+    propagates the first exception raised by any worker *after* all futures
+    have completed. This makes it safe to use in batch-processing flows where
+    per-item results (e.g., metrics) are required and failures must not be
+    silently ignored.
+
     Args:
-        func: Function to apply to each item
-        items: List of items to process
-        max_workers: Maximum number of parallel workers
-    
+        func: Function to apply to each item.
+        items: List of items to process.
+        max_workers: Maximum number of parallel workers.
+
     Returns:
-        List of results
+        List of results in the same order as ``items``.
     """
-    results = []
+    if not items:
+        return []
+
+    results: List[Any] = [None] * len(items)
+    first_exc: Optional[BaseException] = None
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_item = {executor.submit(func, item): item for item in items}
-        for future in concurrent.futures.as_completed(future_to_item):
+        future_to_index = {
+            executor.submit(func, item): index for index, item in enumerate(items)
+        }
+        for future in concurrent.futures.as_completed(future_to_index):
+            index = future_to_index[future]
             try:
-                result = future.result()
-                results.append(result)
-            except Exception as e:
-                # Log error but continue processing other items
-                results.append(None)
+                results[index] = future.result()
+            except BaseException as exc:  # noqa: BLE001 - propagate first failure
+                if first_exc is None:
+                    first_exc = exc
+
+    if first_exc is not None:
+        # Re-raise the first captured exception after allowing all
+        # futures to complete, so that resources are cleaned up.
+        raise first_exc
+
     return results
 
 
@@ -740,32 +760,153 @@ def copy_db_to_db(
         # Execute query and write to target
         if batch_size:
             # Handle batched results with progress reporting
-            result = execute_query(source_url, query, batch_size, target_env if apply_masks else None, apply_masks)
+            result_iter = execute_query(
+                source_url,
+                query,
+                batch_size,
+                target_env if apply_masks else None,
+                apply_masks,
+            )
 
-            first_batch = True
             total_records = 0
             batch_number = 0
 
-            safe_print(f"📊 Starting batch copy (batch size: {batch_size})...")
+            safe_print(
+                f"📊 Starting batch copy (batch size: {batch_size}, "
+                f"parallel_workers: {parallel_workers})..."
+            )
 
-            for chunk in result:
-                batch_number += 1
-                current_mode = mode_enum if first_batch else WriteMode.APPEND
+            if not parallel_workers or parallel_workers <= 1:
+                # Sequential path (no parallelism requested)
+                for chunk in result_iter:
+                    batch_number += 1
+                    current_mode = mode_enum if batch_number == 1 else WriteMode.APPEND
 
-                # Write batch using optimized streaming
-                records_written = write_to_db(chunk, target_url, table, current_mode)
-                total_records += records_written
+                    start_ts = datetime.now()
+                    start_perf = time.perf_counter()
+                    records_written = write_to_db(chunk, target_url, table, mode=current_mode)
+                    duration = time.perf_counter() - start_perf
+                    end_ts = datetime.now()
 
-                # Print progress
-                safe_print(f"✓ Batch {batch_number}: Copied {records_written:,} records | Total: {total_records:,} records")
+                    total_records += records_written
 
-                first_batch = False
+                    safe_print(
+                        f"✓ Batch {batch_number}: Copied {records_written:,} records "
+                        f"| Total: {total_records:,} records "
+                        f"| Duration: {duration:.2f}s "
+                        f"| Start: {start_ts.isoformat(timespec='seconds')} "
+                        f"| End: {end_ts.isoformat(timespec='seconds')}"
+                    )
+            else:
+                # Parallel path for batches after the first one
+                try:
+                    first_chunk = next(result_iter)
+                except StopIteration:
+                    first_chunk = None
+
+                if first_chunk is not None:
+                    batch_number = 1
+                    start_ts = datetime.now()
+                    start_perf = time.perf_counter()
+                    records_written = write_to_db(first_chunk, target_url, table, mode=mode_enum)
+                    duration = time.perf_counter() - start_perf
+                    end_ts = datetime.now()
+
+                    total_records += records_written
+
+                    safe_print(
+                        f"✓ Batch {batch_number}: Copied {records_written:,} records "
+                        f"| Total: {total_records:,} records "
+                        f"| Duration: {duration:.2f}s "
+                        f"| Start: {start_ts.isoformat(timespec='seconds')} "
+                        f"| End: {end_ts.isoformat(timespec='seconds')}"
+                    )
+
+                pending_batches: List[Dict[str, Any]] = []
+
+                def _write_single_batch(payload: Dict[str, Any]) -> Dict[str, Any]:
+                    """Worker function to write a single batch in APPEND mode.
+
+                    Returns:
+                        Dict with batch_number, records_written, start_ts,
+                        end_ts and duration for logging/metrics.
+                    """
+                    batch_no = payload["batch_number"]
+                    chunk_df = payload["data"]
+
+                    start = datetime.now()
+                    start_perf_local = time.perf_counter()
+                    written = write_to_db(chunk_df, target_url, table, mode=WriteMode.APPEND)
+                    duration_local = time.perf_counter() - start_perf_local
+                    end = datetime.now()
+
+                    return {
+                        "batch_number": batch_no,
+                        "records_written": written,
+                        "start_ts": start,
+                        "end_ts": end,
+                        "duration": duration_local,
+                    }
+
+                def _flush_pending_batches(batches: List[Dict[str, Any]]) -> None:
+                    nonlocal total_records
+                    if not batches:
+                        return
+
+                    batch_results = process_in_parallel(
+                        _write_single_batch,
+                        batches,
+                        max_workers=parallel_workers,
+                    )
+
+                    for batch_result in sorted(batch_results, key=lambda r: r["batch_number"]):
+                        total_records += batch_result["records_written"]
+                        safe_print(
+                            f"✓ Batch {batch_result['batch_number']}: Copied {batch_result['records_written']:,} records "
+                            f"| Total: {total_records:,} records "
+                            f"| Duration: {batch_result['duration']:.2f}s "
+                            f"| Start: {batch_result['start_ts'].isoformat(timespec='seconds')} "
+                            f"| End: {batch_result['end_ts'].isoformat(timespec='seconds')}"
+                        )
+
+                for chunk in result_iter:
+                    batch_number += 1
+                    pending_batches.append(
+                        {
+                            "batch_number": batch_number,
+                            "data": chunk,
+                        }
+                    )
+
+                    if len(pending_batches) >= parallel_workers:
+                        _flush_pending_batches(pending_batches)
+                        pending_batches = []
+
+                if pending_batches:
+                    _flush_pending_batches(pending_batches)
         else:
             # Handle single result
-            safe_print(f"📊 Copying data in single batch...")
-            result = execute_query(source_url, query, None, target_env if apply_masks else None, apply_masks)
-            total_records = write_to_db(result, target_url, table, mode_enum)
-            safe_print(f"✓ Copied {total_records:,} records")
+            safe_print("📊 Copying data in single batch...")
+            result = execute_query(
+                source_url,
+                query,
+                None,
+                target_env if apply_masks else None,
+                apply_masks,
+            )
+
+            start_ts = datetime.now()
+            start_perf = time.perf_counter()
+            total_records = write_to_db(result, target_url, table, mode=mode_enum)
+            duration = time.perf_counter() - start_perf
+            end_ts = datetime.now()
+
+            safe_print(
+                f"✓ Copied {total_records:,} records "
+                f"| Duration: {duration:.2f}s "
+                f"| Start: {start_ts.isoformat(timespec='seconds')} "
+                f"| End: {end_ts.isoformat(timespec='seconds')}"
+            )
 
         message = f"Successfully copied {total_records} records to table '{table}'"
         if apply_masks:
