@@ -712,10 +712,104 @@ class TestCopyUtilities:
             return f"processed_{item}"
 
         items = ['good_item', 'bad_item']
-        result = copy.process_in_parallel(test_func, items, max_workers=2)
+        with pytest.raises(Exception) as exc_info:
+            copy.process_in_parallel(test_func, items, max_workers=2)
 
-        # Should return results with None for failed items
-        assert result == ['processed_good_item', None]
+        # The first exception raised by a worker should be propagated
+        assert "Processing failed" in str(exc_info.value)
+
+    def test_copy_db_to_db_parallel_uses_process_in_parallel(self):
+        """copy_db_to_db should use process_in_parallel when parallel_workers > 1."""
+        batch1 = pd.DataFrame({'id': [1]})
+        batch2 = pd.DataFrame({'id': [2]})
+        batch3 = pd.DataFrame({'id': [3]})
+
+        with patch('elm.core.copy.get_connection_url') as mock_get_url, \
+             patch('elm.core.copy.execute_query') as mock_execute, \
+             patch('elm.core.copy.write_to_db') as mock_write_db, \
+             patch('elm.core.copy.process_in_parallel') as mock_parallel:
+
+            mock_get_url.return_value = 'postgresql://user:pass@localhost:5432/db'
+            mock_execute.return_value = iter([batch1, batch2, batch3])
+            mock_write_db.return_value = 10
+
+            # Simulate parallel execution while keeping behaviour deterministic
+            def fake_parallel(func, items, max_workers):
+                return [func(item) for item in items]
+
+            mock_parallel.side_effect = fake_parallel
+
+            result = copy.copy_db_to_db(
+                source_env='source-env',
+                target_env='target-env',
+                query='SELECT * FROM test_table',
+                table='target_table',
+                mode='REPLACE',
+                batch_size=1,
+                parallel_workers=2,
+                validate_target=False,
+                create_if_not_exists=False,
+                apply_masks=False,
+            )
+
+            assert result.success is True
+            # 3 batches * 10 records from mock_write_db
+            assert result.record_count == 30
+
+            # process_in_parallel should be called once with 2 pending batches
+            mock_parallel.assert_called_once()
+            parallel_args, _ = mock_parallel.call_args
+            assert len(parallel_args[1]) == 2
+
+            # First batch should use REPLACE, subsequent batches APPEND
+            assert mock_write_db.call_count == 3
+            first_mode = mock_write_db.call_args_list[0].kwargs['mode']
+            second_mode = mock_write_db.call_args_list[1].kwargs['mode']
+            third_mode = mock_write_db.call_args_list[2].kwargs['mode']
+            assert first_mode == WriteMode.REPLACE
+            assert second_mode == WriteMode.APPEND
+            assert third_mode == WriteMode.APPEND
+
+    def test_copy_db_to_db_oracle_fallback_parallel_batches(self):
+        """Oracle fallback via pandas to_sql should run once per batch in parallel mode."""
+        batch1 = pd.DataFrame({'id': [1]})
+        batch2 = pd.DataFrame({'id': [2]})
+
+        with patch('elm.core.copy.get_connection_url') as mock_get_url, \
+             patch('elm.core.copy.execute_query') as mock_execute, \
+             patch('elm.core.streaming.write_oracle_executemany') as mock_oracle_exec, \
+             patch('elm.core.streaming._write_pandas_fallback') as mock_fallback:
+
+            # Use an Oracle-style URL so streaming detects the correct database type
+            mock_get_url.return_value = 'oracle+oracledb://user:pass@localhost:1521/db'
+            mock_execute.return_value = iter([batch1, batch2])
+
+            # Force the optimized Oracle path to fail so that fallback is used
+            mock_oracle_exec.side_effect = Exception("optimized writer failed")
+
+            def fake_fallback(data, connection_url, table_name, mode, batch_size=None):
+                # Simulate a successful pandas to_sql write by returning row count
+                return len(data)
+
+            mock_fallback.side_effect = fake_fallback
+
+            result = copy.copy_db_to_db(
+                source_env='source-env',
+                target_env='target-env',
+                query='SELECT * FROM test_table',
+                table='target_table',
+                mode='REPLACE',
+                batch_size=1,
+                parallel_workers=2,
+                validate_target=False,
+                create_if_not_exists=False,
+                apply_masks=False,
+            )
+
+            assert result.success is True
+            assert result.record_count == 2
+            # Fallback should be invoked once per batch
+            assert mock_fallback.call_count == 2
 
 
 class TestCopyEdgeCases:
