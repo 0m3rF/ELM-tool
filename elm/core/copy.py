@@ -548,7 +548,8 @@ def copy_db_to_file(
     batch_size: Optional[int] = None,
     parallel_workers: int = 1,
     source_encryption_key: Optional[str] = None,
-    apply_masks: bool = True
+    apply_masks: bool = True,
+    verbose_batch_logs: bool = True,
 ) -> OperationResult:
     """
     Copy data from database to file.
@@ -585,21 +586,46 @@ def copy_db_to_file(
 
         # Execute query and write to file
         if batch_size:
-            # Handle batched results
+            # Handle batched results with optional per-batch logging
             result = execute_query(connection_url, query, batch_size, source_env, apply_masks)
 
             first_batch = True
             total_records = 0
+            batch_index = 0
+            overall_start = time.perf_counter()
+
             for chunk in result:
+                batch_index += 1
+                batch_start = time.perf_counter()
+
                 current_mode = file_mode if first_batch else 'a'
                 write_to_file(chunk, file_path, format_enum, current_mode)
                 total_records += len(chunk)
                 first_batch = False
+
+                batch_end = time.perf_counter()
+                if verbose_batch_logs:
+                    safe_print(
+                        f"Batch {batch_index}: wrote {len(chunk):,} records to file in "
+                        f"{batch_end - batch_start:.3f}s",
+                    )
+
+            overall_end = time.perf_counter()
+            safe_print(
+                f"Batch copy to file summary: wrote {total_records:,} records in "
+                f"{overall_end - overall_start:.3f}s",
+            )
         else:
             # Handle single result
+            overall_start = time.perf_counter()
             result = execute_query(connection_url, query, None, source_env, apply_masks)
             write_to_file(result, file_path, format_enum, file_mode)
             total_records = len(result)
+            overall_end = time.perf_counter()
+            safe_print(
+                f"Copy to file summary: wrote {total_records:,} records in "
+                f"{overall_end - overall_start:.3f}s",
+            )
 
         message = f"Successfully copied {total_records} records to {file_path}"
         if apply_masks:
@@ -622,7 +648,8 @@ def copy_file_to_db(
     target_encryption_key: Optional[str] = None,
     validate_target: bool = False,
     create_if_not_exists: bool = False,
-    apply_masks: bool = True
+    apply_masks: bool = True,
+    verbose_batch_logs: bool = True,
 ) -> OperationResult:
     """
     Copy data from file to database.
@@ -658,8 +685,10 @@ def copy_file_to_db(
 
         # Read data from file
         safe_print(f"📂 Reading data from file: {file_path}")
+        read_start = time.perf_counter()
         data = read_from_file(file_path, format_enum)
-        safe_print(f"✓ Loaded {len(data):,} records from file")
+        read_end = time.perf_counter()
+        safe_print(f"✓ Loaded {len(data):,} records from file in {read_end - read_start:.3f}s")
 
         # Apply masking if needed
         if apply_masks:
@@ -671,8 +700,13 @@ def copy_file_to_db(
 
         # Write to database
         safe_print(f"📊 Writing data to table '{table}'...")
+        overall_start = time.perf_counter()
         total_records = write_to_db(data, connection_url, table, mode_enum, batch_size)
-        safe_print(f"✓ Successfully wrote {total_records:,} records")
+        overall_end = time.perf_counter()
+        safe_print(
+            f"✓ Successfully wrote {total_records:,} records in "
+            f"{overall_end - overall_start:.3f}s",
+        )
 
         message = f"Successfully copied {total_records} records to table '{table}'"
         if apply_masks:

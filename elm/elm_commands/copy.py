@@ -17,7 +17,13 @@ def copy():
 @click.option("-p", "--parallel", type=int, default=1, help="Number of parallel processes")
 @click.option("-k", "--encryption-key", required=False, help="Encryption key for encrypted environments")
 @click.option("--no-mask", is_flag=True, help="Disable data masking")
-def db2file(source, query, file, format, mode, batch_size, parallel, encryption_key, no_mask):
+@click.option(
+    "--verbose-batch-logs/--no-verbose-batch-logs",
+    default=True,
+    help="Enable or disable per-batch timing logs (summary is always shown).",
+    show_default=True,
+)
+def db2file(source, query, file, format, mode, batch_size, parallel, encryption_key, no_mask, verbose_batch_logs):
     """Copy data from database to file"""
     # Use core module for the operation
     result = core_copy.copy_db_to_file(
@@ -29,7 +35,8 @@ def db2file(source, query, file, format, mode, batch_size, parallel, encryption_
         batch_size=batch_size,
         parallel_workers=parallel,
         source_encryption_key=encryption_key,
-        apply_masks=not no_mask
+        apply_masks=not no_mask,
+        verbose_batch_logs=verbose_batch_logs,
     )
     
     if result.success:
@@ -51,7 +58,13 @@ def db2file(source, query, file, format, mode, batch_size, parallel, encryption_
 @click.option("--validate-target", is_flag=True, help="Validate that target table exists and has all required columns")
 @click.option("--create-if-not-exists", is_flag=True, help="Create target table if it doesn't exist")
 @click.option("--no-mask", is_flag=True, help="Disable data masking")
-def file2db(source, target, table, format, mode, batch_size, parallel, encryption_key, validate_target, create_if_not_exists, no_mask):
+@click.option(
+    "--verbose-batch-logs/--no-verbose-batch-logs",
+    default=True,
+    help="Enable or disable per-batch timing logs (summary is always shown).",
+    show_default=True,
+)
+def file2db(source, target, table, format, mode, batch_size, parallel, encryption_key, validate_target, create_if_not_exists, no_mask, verbose_batch_logs):
     """Copy data from file to database"""
     # Use core module for the operation
     result = core_copy.copy_file_to_db(
@@ -65,7 +78,8 @@ def file2db(source, target, table, format, mode, batch_size, parallel, encryptio
         target_encryption_key=encryption_key,
         validate_target=validate_target,
         create_if_not_exists=create_if_not_exists,
-        apply_masks=not no_mask
+        apply_masks=not no_mask,
+        verbose_batch_logs=verbose_batch_logs,
     )
     
     if result.success:
@@ -88,7 +102,13 @@ def file2db(source, target, table, format, mode, batch_size, parallel, encryptio
 @click.option("--validate-target", is_flag=True, help="Validate that target table exists and has all required columns")
 @click.option("--create-if-not-exists", is_flag=True, help="Create target table if it doesn't exist")
 @click.option("--no-mask", is_flag=True, help="Disable data masking")
-def db2db(source, target, query, table, mode, batch_size, parallel, source_key, target_key, validate_target, create_if_not_exists, no_mask):
+@click.option(
+    "--verbose-batch-logs/--no-verbose-batch-logs",
+    default=True,
+    help="Enable or disable per-batch timing logs (summary is always shown).",
+    show_default=True,
+)
+def db2db(source, target, query, table, mode, batch_size, parallel, source_key, target_key, validate_target, create_if_not_exists, no_mask, verbose_batch_logs):
     """Copy data from one database to another"""
     # Use core module for the operation
     result = core_copy.copy_db_to_db(
@@ -103,7 +123,8 @@ def db2db(source, target, query, table, mode, batch_size, parallel, source_key, 
         target_encryption_key=target_key,
         validate_target=validate_target,
         create_if_not_exists=create_if_not_exists,
-        apply_masks=not no_mask
+        apply_masks=not no_mask,
+        verbose_batch_logs=verbose_batch_logs,
     )
     
     if result.success:
