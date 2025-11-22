@@ -294,7 +294,8 @@ def copy_db_to_db(
     target_encryption_key: Optional[str] = None,
     validate_target: bool = False,
     create_if_not_exists: bool = False,
-    apply_masks: bool = True
+    apply_masks: bool = True,
+    verbose_batch_logs: bool = True,
 ) -> Dict[str, Any]:
     """
     Copy data from database to database.
@@ -312,6 +313,7 @@ def copy_db_to_db(
         validate_target: Whether to validate target table
         create_if_not_exists: Whether to create target table if it doesn't exist
         apply_masks: Whether to apply masking rules
+        verbose_batch_logs: Whether to print per-batch timing logs (in addition to summary)
 
     Returns:
         Dictionary with operation results
@@ -328,7 +330,8 @@ def copy_db_to_db(
         target_encryption_key=target_encryption_key,
         validate_target=validate_target,
         create_if_not_exists=create_if_not_exists,
-        apply_masks=apply_masks
+        apply_masks=apply_masks,
+        verbose_batch_logs=verbose_batch_logs,
     )
     return result.to_dict()
 

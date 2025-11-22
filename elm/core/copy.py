@@ -696,7 +696,8 @@ def copy_db_to_db(
     target_encryption_key: Optional[str] = None,
     validate_target: bool = False,
     create_if_not_exists: bool = False,
-    apply_masks: bool = True
+    apply_masks: bool = True,
+    verbose_batch_logs: bool = True,
 ) -> OperationResult:
     """
     Copy data from database to database.
@@ -714,6 +715,7 @@ def copy_db_to_db(
         validate_target: Whether to validate target table
         create_if_not_exists: Whether to create target table if it doesn't exist
         apply_masks: Whether to apply masking rules
+        verbose_batch_logs: Whether to print per-batch timing logs (in addition to summary)
 
     Returns:
         OperationResult with operation status and details
@@ -758,6 +760,9 @@ def copy_db_to_db(
                 raise CopyError(f"Error during validation: {str(e)}")
 
         # Execute query and write to target
+        overall_start_ts: Optional[datetime] = None
+        overall_start_perf: Optional[float] = None
+
         if batch_size:
             # Handle batched results with progress reporting
             result_iter = execute_query(
@@ -776,6 +781,9 @@ def copy_db_to_db(
                 f"parallel_workers: {parallel_workers})..."
             )
 
+            overall_start_ts = datetime.now()
+            overall_start_perf = time.perf_counter()
+
             if not parallel_workers or parallel_workers <= 1:
                 # Sequential path (no parallelism requested)
                 for chunk in result_iter:
@@ -790,13 +798,14 @@ def copy_db_to_db(
 
                     total_records += records_written
 
-                    safe_print(
-                        f"✓ Batch {batch_number}: Copied {records_written:,} records "
-                        f"| Total: {total_records:,} records "
-                        f"| Duration: {duration:.2f}s "
-                        f"| Start: {start_ts.isoformat(timespec='seconds')} "
-                        f"| End: {end_ts.isoformat(timespec='seconds')}"
-                    )
+                    if verbose_batch_logs:
+                        safe_print(
+                            f"✓ Batch {batch_number}: Copied {records_written:,} records "
+                            f"| Total: {total_records:,} records "
+                            f"| Duration: {duration:.2f}s "
+                            f"| Start: {start_ts.isoformat(timespec='seconds')} "
+                            f"| End: {end_ts.isoformat(timespec='seconds')}"
+                        )
             else:
                 # Parallel path for batches after the first one
                 try:
@@ -814,13 +823,14 @@ def copy_db_to_db(
 
                     total_records += records_written
 
-                    safe_print(
-                        f"✓ Batch {batch_number}: Copied {records_written:,} records "
-                        f"| Total: {total_records:,} records "
-                        f"| Duration: {duration:.2f}s "
-                        f"| Start: {start_ts.isoformat(timespec='seconds')} "
-                        f"| End: {end_ts.isoformat(timespec='seconds')}"
-                    )
+                    if verbose_batch_logs:
+                        safe_print(
+                            f"✓ Batch {batch_number}: Copied {records_written:,} records "
+                            f"| Total: {total_records:,} records "
+                            f"| Duration: {duration:.2f}s "
+                            f"| Start: {start_ts.isoformat(timespec='seconds')} "
+                            f"| End: {end_ts.isoformat(timespec='seconds')}"
+                        )
 
                 pending_batches: List[Dict[str, Any]] = []
 
@@ -861,13 +871,14 @@ def copy_db_to_db(
 
                     for batch_result in sorted(batch_results, key=lambda r: r["batch_number"]):
                         total_records += batch_result["records_written"]
-                        safe_print(
-                            f"✓ Batch {batch_result['batch_number']}: Copied {batch_result['records_written']:,} records "
-                            f"| Total: {total_records:,} records "
-                            f"| Duration: {batch_result['duration']:.2f}s "
-                            f"| Start: {batch_result['start_ts'].isoformat(timespec='seconds')} "
-                            f"| End: {batch_result['end_ts'].isoformat(timespec='seconds')}"
-                        )
+                        if verbose_batch_logs:
+                            safe_print(
+                                f"✓ Batch {batch_result['batch_number']}: Copied {batch_result['records_written']:,} records "
+                                f"| Total: {total_records:,} records "
+                                f"| Duration: {batch_result['duration']:.2f}s "
+                                f"| Start: {batch_result['start_ts'].isoformat(timespec='seconds')} "
+                                f"| End: {batch_result['end_ts'].isoformat(timespec='seconds')}"
+                            )
 
                 for chunk in result_iter:
                     batch_number += 1
@@ -885,7 +896,7 @@ def copy_db_to_db(
                 if pending_batches:
                     _flush_pending_batches(pending_batches)
         else:
-            # Handle single result
+            # Handle single result (non-batched)
             safe_print("📊 Copying data in single batch...")
             result = execute_query(
                 source_url,
@@ -895,17 +906,41 @@ def copy_db_to_db(
                 apply_masks,
             )
 
-            start_ts = datetime.now()
-            start_perf = time.perf_counter()
+            overall_start_ts = datetime.now()
+            overall_start_perf = time.perf_counter()
             total_records = write_to_db(result, target_url, table, mode=mode_enum)
-            duration = time.perf_counter() - start_perf
-            end_ts = datetime.now()
+            overall_duration = time.perf_counter() - overall_start_perf
+            overall_end_ts = datetime.now()
 
+            if overall_duration > 0:
+                throughput = total_records / overall_duration
+            else:
+                throughput = 0.0
+
+            # For single-batch operations, this acts as both per-batch and summary log
             safe_print(
                 f"✓ Copied {total_records:,} records "
-                f"| Duration: {duration:.2f}s "
-                f"| Start: {start_ts.isoformat(timespec='seconds')} "
-                f"| End: {end_ts.isoformat(timespec='seconds')}"
+                f"in {overall_duration:.2f}s "
+                f"({throughput:,.2f} records/s) "
+                f"| Start: {overall_start_ts.isoformat(timespec='seconds')} "
+                f"| End: {overall_end_ts.isoformat(timespec='seconds')}"
+            )
+
+        # Emit final summary for batched operations
+        if batch_size and overall_start_perf is not None and overall_start_ts is not None:
+            overall_end_ts = datetime.now()
+            overall_duration = time.perf_counter() - overall_start_perf
+            if overall_duration > 0:
+                throughput = total_records / overall_duration
+            else:
+                throughput = 0.0
+
+            safe_print(
+                f"📈 Batch copy summary: Copied {total_records:,} records "
+                f"in {overall_duration:.2f}s "
+                f"({throughput:,.2f} records/s) "
+                f"| Start: {overall_start_ts.isoformat(timespec='seconds')} "
+                f"| End: {overall_end_ts.isoformat(timespec='seconds')}"
             )
 
         message = f"Successfully copied {total_records} records to table '{table}'"
