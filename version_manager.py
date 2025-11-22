@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""
-Version management script for ELM Tool
-Usage: python version_manager.py [patch|minor|major]
+"""Version management script for ELM Tool.
+
+This script bumps the project version, optionally auto-commits & pushes
+the change, and can also build and upload the package to TestPyPI and/or
+PyPI.
 """
 
 import re
 import sys
 from pathlib import Path
+
+import click
 
 def get_current_version():
     """Get current version from pyproject.toml"""
@@ -97,38 +101,130 @@ def create_git_tag(version):
     except subprocess.CalledProcessError:
         print("Warning: Could not create git tag (git not available or not a git repo)")
 
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python version_manager.py [patch|minor|major]")
-        sys.exit(1)
-    
-    bump_type = sys.argv[1].lower()
-    
-    if bump_type not in ['patch', 'minor', 'major']:
-        print("Error: Bump type must be 'patch', 'minor', or 'major'")
-        sys.exit(1)
-    
+
+def build_and_publish(target):
+    """Build distribution artifacts and upload to TestPyPI and/or PyPI."""
+    import subprocess
+
+    if not target:
+        return
+
+    target = target.lower()
+    if target not in {"test", "prod", "both"}:
+        return
+
+    try:
+        print("Building distribution artifacts (python -m build)...")
+        subprocess.run([sys.executable, "-m", "build"], check=True)
+        
+        #delete dist folder
+        import shutil
+        shutil.rmtree("dist", ignore_errors=True)
+
+        if target in {"test", "both"}:
+            print("Uploading to TestPyPI (python -m twine upload --repository testpypi dist/*)...")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "twine",
+                    "upload",
+                    "--repository",
+                    "testpypi",
+                    "dist/*",
+                ],
+                check=True,
+            )
+
+        if target in {"prod", "both"}:
+            print("Uploading to PyPI (python -m twine upload dist/*)...")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "twine",
+                    "upload",
+                    "dist/*",
+                ],
+                check=True,
+            )
+    except subprocess.CalledProcessError:
+        print("Warning: Build or upload failed. Please check the output above.")
+
+
+@click.command()
+@click.option(
+    "--bump",
+    "-b",
+    "bump_type",
+    type=click.Choice(["patch", "minor", "major"], case_sensitive=False),
+    required=True,
+    help="Which part of the version to bump.",
+)
+@click.option(
+    "--auto-commit-message",
+    "-m",
+    type=str,
+    help=(
+        "If provided, automatically git add/commit/push and push tags "
+        "with this commit message."
+    ),
+)
+@click.option(
+    "--build",
+    "build_target",
+    type=click.Choice(["none", "test", "prod", "both"], case_sensitive=False),
+    default="none",
+    show_default=True,
+    help=(
+        "Build the package and upload to TestPyPI, PyPI, or both. "
+        "Use 'none' to skip the build/upload step."
+    ),
+)
+def main(bump_type, auto_commit_message, build_target):
+    """Bump version, optionally auto-commit & push, and build/publish releases."""
+
+    bump_type = bump_type.lower()
+
     current_version = get_current_version()
     new_version = bump_version(current_version, bump_type)
-    
+
     print(f"Current version: {current_version}")
     print(f"New version: {new_version}")
-    
+
     # Confirm the change
     response = input(f"Do you want to bump version to {new_version}? (y/N): ")
     if response.lower() != 'y':
         print("Version bump cancelled")
         sys.exit(0)
-    
+
     # Update files
     update_pyproject_toml(new_version)
     update_init_py(new_version)
-    
+
     # Create git tag
     create_git_tag(new_version)
-    
+
+    # Optional: auto-commit and push changes
+    if auto_commit_message:
+        import subprocess
+
+        try:
+            subprocess.run(['git', 'add', '.'], check=True)
+            subprocess.run(['git', 'commit', '-m', auto_commit_message], check=True)
+            subprocess.run(['git', 'push'], check=True)
+            subprocess.run(['git', 'push', '--tags'], check=True)
+            print(f"Auto-committed changes with message: {auto_commit_message}")
+        except subprocess.CalledProcessError:
+            print("Warning: Could not auto-commit changes (git not available or not a git repo)")
+
+    # Optional: build and upload to TestPyPI and/or PyPI
+    build_target = build_target.lower()
+    if build_target != "none":
+        build_and_publish(build_target)
+
     print(f"\n✅ Version successfully bumped to {new_version}")
-    print("\nNext steps:")
+    print("\nNext steps (if not already done by this script):")
     print("1. Review changes: git diff")
     print("2. Commit changes: git add . && git commit -m 'Bump version to {}'".format(new_version))
     print("3. Push changes: git push")

@@ -203,7 +203,8 @@ def copy_db_to_file(
     batch_size: Optional[int] = None,
     parallel_workers: int = 1,
     source_encryption_key: Optional[str] = None,
-    apply_masks: bool = True
+    apply_masks: bool = True,
+    verbose_batch_logs: bool = True,
 ) -> Dict[str, Any]:
     """
     Copy data from database to file.
@@ -218,6 +219,7 @@ def copy_db_to_file(
         parallel_workers: Number of parallel workers
         source_encryption_key: Encryption key for source environment
         apply_masks: Whether to apply masking rules
+        verbose_batch_logs: Whether to log per-batch timings (overall summary is always logged)
 
     Returns:
         Dictionary with operation results
@@ -231,7 +233,8 @@ def copy_db_to_file(
         batch_size=batch_size,
         parallel_workers=parallel_workers,
         source_encryption_key=source_encryption_key,
-        apply_masks=apply_masks
+        apply_masks=apply_masks,
+        verbose_batch_logs=verbose_batch_logs,
     )
     return result.to_dict()
 
@@ -246,7 +249,8 @@ def copy_file_to_db(
     target_encryption_key: Optional[str] = None,
     validate_target: bool = False,
     create_if_not_exists: bool = False,
-    apply_masks: bool = True
+    apply_masks: bool = True,
+    verbose_batch_logs: bool = True,
 ) -> Dict[str, Any]:
     """
     Copy data from file to database.
@@ -263,6 +267,7 @@ def copy_file_to_db(
         validate_target: Whether to validate target table
         create_if_not_exists: Whether to create target table if it doesn't exist
         apply_masks: Whether to apply masking rules
+        verbose_batch_logs: Whether to log per-batch timings (overall summary is always logged)
 
     Returns:
         Dictionary with operation results
@@ -278,7 +283,8 @@ def copy_file_to_db(
         target_encryption_key=target_encryption_key,
         validate_target=validate_target,
         create_if_not_exists=create_if_not_exists,
-        apply_masks=apply_masks
+        apply_masks=apply_masks,
+        verbose_batch_logs=verbose_batch_logs,
     )
     return result.to_dict()
 

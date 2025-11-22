@@ -197,7 +197,8 @@ class TestCopyAPI:
             batch_size=None,
             parallel_workers=1,
             source_encryption_key=None,
-            apply_masks=True
+            apply_masks=True,
+            verbose_batch_logs=True
         )
 
     @patch('elm.core.copy.copy_file_to_db')
