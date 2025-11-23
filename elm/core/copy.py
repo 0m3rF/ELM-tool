@@ -23,7 +23,7 @@ from elm.core.utils import (
     validate_required_params, convert_sqlalchemy_mode, safe_print
 )
 from elm.core.environment import get_connection_url, _initialize_oracle_client, _handle_oracle_connection_error
-from elm.core.masking import apply_masking
+from elm.core.masking import apply_masking, _get_masking_definitions_cached
 from elm.core.streaming import write_to_db_streaming
 
 
@@ -47,6 +47,14 @@ def execute_query(
     Returns:
         DataFrame or iterator of DataFrames (if batched)
     """
+    # Pre-load masking definitions once per execute_query call when masking is
+    # enabled. This avoids re-resolving the definitions for every batch while
+    # still benefiting from the cached, mtime-aware loader in the masking
+    # module. If masking is disabled, we never touch the masking layer here.
+    definitions = None
+    if apply_masks:
+        definitions = _get_masking_definitions_cached()
+
     def _create_batched_generator(eng):
         """Helper function to create a batched query generator."""
         def batched_query_generator():
@@ -55,7 +63,9 @@ def execute_query(
                     result = pd.read_sql_query(query, connection, chunksize=batch_size)
                     for batch in result:
                         if apply_masks:
-                            yield apply_masking(batch, environment)
+                            # Pass pre-loaded definitions into apply_masking so
+                            # they are reused across all batches.
+                            yield apply_masking(batch, environment, definitions=definitions)
                         else:
                             yield batch
             except Exception as e:
@@ -68,7 +78,7 @@ def execute_query(
                             result = pd.read_sql_query(query, connection, chunksize=batch_size)
                             for batch in result:
                                 if apply_masks:
-                                    yield apply_masking(batch, environment)
+                                    yield apply_masking(batch, environment, definitions=definitions)
                                 else:
                                     yield batch
                     else:
@@ -99,7 +109,7 @@ def execute_query(
 
                 # Apply masking if requested
                 if apply_masks:
-                    result = apply_masking(result, environment)
+                    result = apply_masking(result, environment, definitions=definitions)
 
                 return result
     except Exception as e:
@@ -116,7 +126,7 @@ def execute_query(
                     with engine.connect() as connection:
                         result = pd.read_sql_query(query, connection)
                         if apply_masks:
-                            result = apply_masking(result, environment)
+                            result = apply_masking(result, environment, definitions=definitions)
                         return result
             else:
                 # Re-raise the original error

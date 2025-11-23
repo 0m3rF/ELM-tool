@@ -13,11 +13,60 @@ from typing import Dict, Any, Optional, List
 from elm.core.types import MaskingConfig, MaskingAlgorithm, OperationResult
 from elm.core.exceptions import MaskingError, ValidationError
 from elm.core.utils import (
-    validate_masking_algorithm, create_success_result, create_error_result, 
+    validate_masking_algorithm, create_success_result, create_error_result,
     handle_exception, validate_required_params
 )
 from elm.elm_utils import variables
 from elm.elm_utils.mask_algorithms import MASKING_ALGORITHMS
+
+
+# Simple in-process cache for masking definitions to avoid repeated disk I/O
+# during large streaming copy operations. The cache is keyed by the masking
+# file's modification time so that changes to the mask file are picked up
+# automatically on the next access.
+_mask_definitions_cache: Optional[Dict[str, Any]] = None
+_mask_definitions_mtime: Optional[float] = None
+
+
+def _invalidate_masking_cache() -> None:
+    """Clear the cached masking definitions.
+
+    This is called after we persist new masking definitions so subsequent
+    masking operations see the updated rules.
+    """
+    global _mask_definitions_cache, _mask_definitions_mtime
+    _mask_definitions_cache = None
+    _mask_definitions_mtime = None
+
+
+def _get_masking_definitions_cached() -> Dict[str, Any]:
+    """Return masking definitions using a lightweight cache.
+
+    For long-running db2db copy operations that process many batches, reading
+    the masking file from disk on every batch becomes unnecessary overhead.
+    This helper keeps definitions in memory and only reloads them when the
+    underlying file's modification time changes.
+    """
+    global _mask_definitions_cache, _mask_definitions_mtime
+
+    mask_file = variables.MASK_FILE
+
+    try:
+        mtime = os.path.getmtime(mask_file)
+    except FileNotFoundError:
+        # If the file does not exist, behave like load_masking_definitions()
+        # which returns an empty definition structure.
+        mtime = None
+
+    # Fast path: reuse cached definitions if the file has not changed.
+    if _mask_definitions_cache is not None and _mask_definitions_mtime == mtime:
+        return _mask_definitions_cache
+
+    # Either first load or the file changed on disk – read fresh definitions.
+    definitions = load_masking_definitions()
+    _mask_definitions_cache = definitions
+    _mask_definitions_mtime = mtime
+    return definitions
 
 
 def load_masking_definitions() -> Dict[str, Any]:
@@ -52,6 +101,9 @@ def save_masking_definitions(definitions: Dict[str, Any]) -> None:
         with file_lock(variables.MASK_FILE, timeout=10.0):
             with open(variables.MASK_FILE, 'w') as f:
                 json.dump(definitions, f, indent=2)
+        # Ensure any cached definitions are invalidated so the next masking
+        # operation sees the updated rules.
+        _invalidate_masking_cache()
     except Exception as e:
         raise MaskingError(f"Error saving masking definitions: {str(e)}")
 
@@ -289,43 +341,61 @@ def apply_masking(
     Returns:
         Masked DataFrame
     """
+    # Non-DataFrame inputs are passed through unchanged (existing behaviour).
     if not isinstance(data, pd.DataFrame):
         return data
-    
-    # If definitions are not provided, load them
+
+    # If definitions are not provided, use the cached loader to avoid
+    # repeatedly hitting the filesystem for every batch during large copies.
     if definitions is None:
-        definitions = load_masking_definitions()
-    
-    # Get global and environment-specific definitions
-    global_defs = definitions.get('global', {})
-    env_defs = {}
+        definitions = _get_masking_definitions_cached()
+
+    # Get global and environment-specific definitions, normalising to dicts.
+    global_defs = definitions.get('global', {}) or {}
+    env_defs: Dict[str, Any] = {}
     if environment and environment in definitions.get('environments', {}):
-        env_defs = definitions['environments'][environment]
-    
-    # Create a copy of the DataFrame to avoid modifying the original
-    masked_data = data.copy()
-    
-    # Apply masking to each column
-    for column in masked_data.columns:
-        # Check if column has environment-specific masking
+        env_defs = definitions['environments'][environment] or {}
+
+    # Fast-path: if there are no masking rules at all, return the original
+    # DataFrame without copying or iterating over columns.
+    if not global_defs and not env_defs:
+        return data
+
+    # Determine which columns in this DataFrame actually need masking.
+    # Environment-specific rules take precedence over global rules.
+    columns_to_mask: Dict[str, Any] = {}
+    for column in data.columns:
         if column in env_defs:
-            mask_config = env_defs[column]
-            algorithm = mask_config.get('algorithm', 'star')
-            params = mask_config.get('params', {})
-            
-            if algorithm in MASKING_ALGORITHMS:
-                masked_data[column] = masked_data[column].apply(
-                    lambda x: MASKING_ALGORITHMS[algorithm](x, **params)
-                )
-        # Otherwise, check if column has global masking
+            columns_to_mask[column] = env_defs[column]
         elif column in global_defs:
-            mask_config = global_defs[column]
-            algorithm = mask_config.get('algorithm', 'star')
-            params = mask_config.get('params', {})
-            
-            if algorithm in MASKING_ALGORITHMS:
-                masked_data[column] = masked_data[column].apply(
-                    lambda x: MASKING_ALGORITHMS[algorithm](x, **params)
-                )
-    
+            columns_to_mask[column] = global_defs[column]
+
+    # If none of the DataFrame's columns are covered by masking rules, we can
+    # return the original DataFrame without creating a copy.
+    if not columns_to_mask:
+        return data
+
+    # Only now do we create a copy – this avoids unnecessary allocations when
+    # masking is effectively a no-op for the given data.
+    masked_data = data.copy()
+
+    # Apply masking only to the columns that have rules, keeping the logic
+    # identical to the previous implementation but avoiding work on
+    # unaffected columns.
+    for column, mask_config in columns_to_mask.items():
+        algorithm = mask_config.get('algorithm', 'star')
+        params = mask_config.get('params', {}) or {}
+
+        mask_func = MASKING_ALGORITHMS.get(algorithm)
+        if not mask_func:
+            # Unknown algorithm – skip rather than failing hard, preserving
+            # the previous behaviour of ignoring unknown algorithms here.
+            continue
+
+        # Resolve the algorithm function and params once per column and reuse
+        # them inside the per-row apply to minimise per-row overhead.
+        masked_data[column] = masked_data[column].apply(
+            lambda x, func=mask_func, p=params: func(x, **p)
+        )
+
     return masked_data
