@@ -158,8 +158,10 @@ class TestCopyCore:
                     return pd.concat([batch1, batch2])
 
             with patch('pandas.read_sql_query', side_effect=mock_read_sql_query):
-                # Mock apply_masking to return the same data
-                mock_apply_masking.side_effect = lambda df, env: df
+                # Mock apply_masking to return the same data; accept optional
+                # keyword arguments (e.g. definitions) so tests stay robust to
+                # internal API extensions.
+                mock_apply_masking.side_effect = lambda df, env, **kwargs: df
 
                 # Test with batching and masking
                 result = execute_query(
@@ -1015,8 +1017,10 @@ class TestCopyEdgeCases:
 
             mock_handle_error.return_value = True  # Indicates successful retry
 
-            # Mock apply_masking to return the input dataframe (identity function)
-            mock_apply_masking.side_effect = lambda df, env: df
+            # Mock apply_masking to return the input dataframe (identity
+            # function). Accept **kwargs to allow for optional parameters such
+            # as definitions used internally by execute_query.
+            mock_apply_masking.side_effect = lambda df, env, **kwargs: df
 
             result = copy.execute_query(
                 'oracle+oracledb://user:pass@host:1521?service_name=service',
