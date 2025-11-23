@@ -114,12 +114,12 @@ def build_and_publish(target):
         return
 
     try:
-        print("Building distribution artifacts (python -m build)...")
-        subprocess.run([sys.executable, "-m", "build"], check=True)
-        
-        #delete dist folder
+        # delete dist folder
         import shutil
         shutil.rmtree("dist", ignore_errors=True)
+
+        print("Building distribution artifacts (python -m build)...")
+        subprocess.run([sys.executable, "-m", "build"], check=True)
 
         if target in {"test", "both"}:
             print("Uploading to TestPyPI (python -m twine upload --repository testpypi dist/*)...")
