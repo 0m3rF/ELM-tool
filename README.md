@@ -1,6 +1,10 @@
 # ELM Tool
 
-Extract, Load and Mask Tool for Database Operations
+Extract, Load and Mask Tool for Database Operations. 
+
+
+> [!CAUTION]
+> This tool can access to databases, so be very careful while using it on production databases. It does not have any scheduled or automated processes to access to databases, but it is possible that it can be used by malicious users if they have access to your system.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
@@ -127,7 +131,6 @@ elm-tool environment execute dev-pg --query "SELECT * FROM users LIMIT 10"
 Copy data between databases or to/from files with **high-performance streaming** for large datasets and LOB data.
 
 **🚀 Performance Features:**
-- **10-100x faster** than traditional methods for large datasets
 - **Optimized streaming** with database-specific bulk loaders
 - **Real-time progress reporting** for batch operations
 - **Efficient LOB handling** (CLOB, BLOB, TEXT, etc.)
@@ -148,10 +151,10 @@ elm-tool copy db2db --source dev-pg --target prod-pg --query "SELECT * FROM user
 ```
 
 **Optimized Methods by Database:**
-- **PostgreSQL**: COPY protocol or execute_values (50-100x faster)
-- **Oracle**: executemany with array binding (20-100x faster)
-- **SQL Server**: fast_executemany (15-40x faster)
-- **MySQL**: optimized executemany (10-30x faster)
+- **PostgreSQL**: COPY protocol or execute_values
+- **Oracle**: executemany with array binding
+- **SQL Server**: fast_executemany
+- **MySQL**: optimized executemany
 
 ### Data Masking
 
