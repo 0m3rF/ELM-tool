@@ -15,6 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from elm.core.types import WriteMode
 from elm.core.exceptions import DatabaseError, CopyError
 from elm.core.utils import convert_sqlalchemy_mode, safe_print
+from elm.core.environment import _handle_oracle_connection_error, _initialize_oracle_client
 
 
 def detect_database_type(connection_url: str) -> str:
@@ -210,24 +211,42 @@ def write_oracle_executemany(
     connection_url: str,
     table_name: str,
     mode: WriteMode = WriteMode.APPEND
-) -> int:
-    """
-    Write data to Oracle using executemany with array binding (fast bulk insert).
-    
+    ) -> int:
+    """Write data to Oracle using ``executemany`` with array binding.
+
+    This helper prefers Oracle *thick* mode when available to avoid
+    DPY-3015-style password verifier issues in thin mode. The
+    :func:`_initialize_oracle_client` helper is invoked before any
+    connections are created so that, on environments with an Oracle
+    client installed, all subsequent connections use thick mode by
+    default.
+
+    Falls back to standard python-oracledb thin mode automatically when
+    the client or libraries are not available.
+
     Args:
         data: DataFrame to write
         connection_url: Oracle connection URL
         table_name: Target table name
         mode: Write mode
-        
+
     Returns:
         Number of records written
     """
     try:
         import oracledb
     except ImportError:
+        # Provide a clear, user-facing message when the driver itself is
+        # missing rather than surfacing a low-level ImportError.
         raise CopyError("oracledb not installed. Install with: pip install oracledb")
-    
+
+    # Try to activate Oracle thick mode *before* any connections are
+    # created. If this fails (client not installed, misconfigured, etc.)
+    # we continue in thin mode and let python-oracledb surface any
+    # connection errors. The helper itself handles and logs failures, so
+    # we deliberately ignore its return value here.
+    _initialize_oracle_client()
+
     # Parse connection URL to extract credentials
     parsed = urlparse(connection_url)
     
@@ -625,7 +644,6 @@ def _write_pandas_fallback(
     Returns:
         Number of records written
     """
-    from elm.core.environment import _handle_oracle_connection_error
 
     try:
         # For MSSQL, use direct SQL to avoid NVARCHAR(max) issues with old drivers
@@ -663,23 +681,9 @@ def _write_pandas_fallback(
         # Check if this is an Oracle connection and try to handle thin mode errors
         if 'oracle' in connection_url.lower():
             if _handle_oracle_connection_error(connection_url, e):
-                # Retry the write after Oracle client initialization
-                engine = create_engine(connection_url)
-                if_exists = convert_sqlalchemy_mode(mode)
-
-                # Get Oracle-specific type mapping for retry
-                from elm.core.copy import _get_oracle_dtype_mapping
-                dtype_mapping = _get_oracle_dtype_mapping(data)
-
-                if batch_size and len(data) > batch_size:
-                    for i in range(0, len(data), batch_size):
-                        batch = data.iloc[i:i+batch_size]
-                        current_if_exists = if_exists if i == 0 else 'append'
-                        batch.to_sql(table_name, engine, if_exists=current_if_exists, index=False, dtype=dtype_mapping)
-                else:
-                    data.to_sql(table_name, engine, if_exists=if_exists, index=False, dtype=dtype_mapping)
-
-                return len(data)
+                # Oracle thick mode successfully activated – retry using the
+                # high-performance executemany path instead of pandas to_sql
+                return write_oracle_executemany(data, connection_url, table_name, mode)
             else:
                 # Re-raise the original error
                 if isinstance(e, SQLAlchemyError):
