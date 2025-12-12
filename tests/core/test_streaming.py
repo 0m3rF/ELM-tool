@@ -284,6 +284,47 @@ class TestOracleStreaming:
         assert second_row[2] is None  # row_count (NaN) -> None
 
 
+    def test_oracle_thick_mode_fallback_uses_executemany(self):
+        """When Oracle thick mode is activated, fallback should use executemany.
+
+        This ensures that the oracle init client path uses the same high-
+        performance executemany implementation instead of pandas.to_sql.
+        """
+        from elm.core.streaming import _write_pandas_fallback
+
+        data = pd.DataFrame({'id': [1, 2], 'name': ['Alice', 'Bob']})
+
+        oracle_url = "oracle+oracledb://user:pass@localhost:1521/db"
+
+        # First attempt should go through pandas.to_sql and fail with an
+        # Oracle-thin error, triggering _handle_oracle_connection_error.
+        # After thick mode activation succeeds (mocked), we expect
+        # write_oracle_executemany to be called for the retry.
+        with patch('elm.core.streaming.create_engine') as mock_engine, \
+             patch.object(pd.DataFrame, 'to_sql', side_effect=Exception("DPY-3015: password verifier type 0x939")) as mock_to_sql, \
+             patch('elm.core.streaming._handle_oracle_connection_error') as mock_handle, \
+             patch('elm.core.streaming.write_oracle_executemany') as mock_exec:
+
+            mock_engine.return_value = MagicMock()
+            mock_handle.return_value = True
+            mock_exec.return_value = len(data)
+
+            written = _write_pandas_fallback(
+                data=data,
+                connection_url=oracle_url,
+                table_name="test_table",
+                mode=WriteMode.APPEND,
+                batch_size=None,
+            )
+
+        # pandas.to_sql should have been attempted once and failed
+        assert mock_to_sql.call_count >= 1
+
+        # After successful thick-mode handling, executemany-based writer must be used
+        mock_exec.assert_called_once_with(data, oracle_url, "test_table", WriteMode.APPEND)
+        assert written == len(data)
+
+
 class TestMySQLStreaming:
     """Test MySQL-specific streaming operations"""
 

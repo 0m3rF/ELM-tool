@@ -34,8 +34,14 @@ def execute_query(
     environment: Optional[str] = None,
     apply_masks: bool = True
 ) -> Union[pd.DataFrame, Iterator[pd.DataFrame]]:
-    """
-    Execute a query and return the results.
+    """Execute a query and return the results.
+
+    For Oracle URLs we proactively attempt to initialise the Oracle
+    client in *thick* mode via :func:`_initialize_oracle_client` before
+    creating any SQLAlchemy engines. This avoids the python-oracledb
+    limitation where thick mode cannot be enabled after a thin
+    connection has already been created (DPY-2019) and helps prevent
+    DPY-3015 password verifier issues.
 
     Args:
         connection_url: Database connection URL
@@ -47,6 +53,13 @@ def execute_query(
     Returns:
         DataFrame or iterator of DataFrames (if batched)
     """
+    # For Oracle connections, try to activate thick mode *before* any
+    # engine/connection is created so that subsequent operations use the
+    # most compatible mode available. The helper handles and logs all
+    # failures internally, so we intentionally ignore its return value
+    # and proceed regardless.
+    if 'oracle' in connection_url.lower():
+        _initialize_oracle_client()
     # Pre-load masking definitions once per execute_query call when masking is
     # enabled. This avoids re-resolving the definitions for every batch while
     # still benefiting from the cached, mtime-aware loader in the masking
