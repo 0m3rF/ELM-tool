@@ -24,7 +24,7 @@ from elm.core.utils import (
 )
 from elm.core.environment import get_connection_url, _initialize_oracle_client, _handle_oracle_connection_error
 from elm.core.masking import apply_masking, _get_masking_definitions_cached
-from elm.core.streaming import write_to_db_streaming
+from elm.core.streaming import write_to_db_streaming, detect_database_type
 
 
 def execute_query(
@@ -604,6 +604,522 @@ def filter_dataframe_columns(
     return data[cols_to_keep]
 
 
+def check_table_partitioned(connection_url: str, table_name: str) -> Dict[str, Any]:
+    """
+    Check if a table is partitioned and retrieve partition information.
+
+    This function queries system catalogs to determine if the target table uses
+    partitioning and, if so, retrieves information about partition columns and
+    existing partitions.
+
+    Args:
+        connection_url: Database connection URL
+        table_name: Table name to check
+
+    Returns:
+        Dictionary with partition information:
+        - is_partitioned: bool - Whether the table is partitioned
+        - partition_type: str or None - Type of partitioning (RANGE, LIST, HASH, etc.)
+        - partition_columns: List[str] or None - Columns used for partitioning
+        - partitions: List[Dict] or None - List of existing partitions with their bounds
+        - database_type: str - Type of database
+    """
+    db_type = detect_database_type(connection_url)
+    result = {
+        'is_partitioned': False,
+        'partition_type': None,
+        'partition_columns': None,
+        'partitions': None,
+        'database_type': db_type
+    }
+
+    try:
+        engine = create_engine(connection_url)
+
+        if db_type == 'postgresql':
+            result = _check_postgresql_partition(engine, table_name, result)
+        elif db_type == 'oracle':
+            result = _check_oracle_partition(engine, table_name, result)
+        elif db_type == 'mysql':
+            result = _check_mysql_partition(engine, table_name, result)
+        elif db_type == 'mssql':
+            result = _check_mssql_partition(engine, table_name, result)
+
+    except Exception as e:
+        # If partition check fails, log and return non-partitioned result
+        safe_print(f"⚠ Could not check partition status for {table_name}: {str(e)}")
+
+    return result
+
+
+def _check_postgresql_partition(engine, table_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Check partition information for PostgreSQL tables."""
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        # Check if table is partitioned (PostgreSQL 10+)
+        partition_check = conn.execute(text("""
+            SELECT
+                c.relkind,
+                p.partstrat
+            FROM pg_class c
+            LEFT JOIN pg_partitioned_table p ON c.oid = p.partrelid
+            WHERE c.relname = :table_name
+              AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+        """), {"table_name": table_name})
+
+        row = partition_check.fetchone()
+        if row and row[0] == 'p':  # 'p' means partitioned table
+            result['is_partitioned'] = True
+            # Map partition strategy
+            strat_map = {'r': 'RANGE', 'l': 'LIST', 'h': 'HASH'}
+            result['partition_type'] = strat_map.get(row[1], 'UNKNOWN')
+
+            # Get partition columns
+            part_cols = conn.execute(text("""
+                SELECT a.attname
+                FROM pg_partitioned_table p
+                JOIN pg_class c ON c.oid = p.partrelid
+                JOIN pg_attribute a ON a.attrelid = c.oid
+                WHERE c.relname = :table_name
+                  AND a.attnum = ANY(p.partattrs)
+                ORDER BY array_position(p.partattrs, a.attnum)
+            """), {"table_name": table_name})
+            result['partition_columns'] = [r[0] for r in part_cols.fetchall()]
+
+            # Get existing partitions
+            partitions = conn.execute(text("""
+                SELECT
+                    child.relname as partition_name,
+                    pg_get_expr(child.relpartbound, child.oid) as partition_bound
+                FROM pg_inherits
+                JOIN pg_class parent ON pg_inherits.inhparent = parent.oid
+                JOIN pg_class child ON pg_inherits.inhrelid = child.oid
+                WHERE parent.relname = :table_name
+                ORDER BY child.relname
+            """), {"table_name": table_name})
+            result['partitions'] = [
+                {'name': r[0], 'bound': r[1]} for r in partitions.fetchall()
+            ]
+
+    return result
+
+
+def _check_oracle_partition(engine, table_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Check partition information for Oracle tables."""
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        # Check if table is partitioned
+        partition_check = conn.execute(text("""
+            SELECT partitioned FROM user_tables WHERE table_name = UPPER(:table_name)
+        """), {"table_name": table_name})
+
+        row = partition_check.fetchone()
+        if row and row[0] == 'YES':
+            result['is_partitioned'] = True
+
+            # Get partition type and columns
+            part_info = conn.execute(text("""
+                SELECT partitioning_type, column_name
+                FROM user_part_tables t
+                JOIN user_part_key_columns c ON t.table_name = c.name
+                WHERE t.table_name = UPPER(:table_name)
+                ORDER BY c.column_position
+            """), {"table_name": table_name})
+
+            rows = part_info.fetchall()
+            if rows:
+                result['partition_type'] = rows[0][0]
+                result['partition_columns'] = [r[1] for r in rows]
+
+            # Get existing partitions
+            partitions = conn.execute(text("""
+                SELECT partition_name, high_value
+                FROM user_tab_partitions
+                WHERE table_name = UPPER(:table_name)
+                ORDER BY partition_position
+            """), {"table_name": table_name})
+            result['partitions'] = [
+                {'name': r[0], 'bound': r[1]} for r in partitions.fetchall()
+            ]
+
+    return result
+
+
+def _check_mysql_partition(engine, table_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Check partition information for MySQL tables."""
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        # Get partition information from INFORMATION_SCHEMA
+        partition_check = conn.execute(text("""
+            SELECT PARTITION_METHOD, PARTITION_EXPRESSION
+            FROM INFORMATION_SCHEMA.PARTITIONS
+            WHERE TABLE_NAME = :table_name
+              AND TABLE_SCHEMA = DATABASE()
+              AND PARTITION_NAME IS NOT NULL
+            LIMIT 1
+        """), {"table_name": table_name})
+
+        row = partition_check.fetchone()
+        if row:
+            result['is_partitioned'] = True
+            result['partition_type'] = row[0]
+            # Parse partition expression to get column(s)
+            result['partition_columns'] = [row[1].strip('`').strip()] if row[1] else []
+
+            # Get existing partitions
+            partitions = conn.execute(text("""
+                SELECT PARTITION_NAME, PARTITION_DESCRIPTION
+                FROM INFORMATION_SCHEMA.PARTITIONS
+                WHERE TABLE_NAME = :table_name
+                  AND TABLE_SCHEMA = DATABASE()
+                  AND PARTITION_NAME IS NOT NULL
+                ORDER BY PARTITION_ORDINAL_POSITION
+            """), {"table_name": table_name})
+            result['partitions'] = [
+                {'name': r[0], 'bound': r[1]} for r in partitions.fetchall()
+            ]
+
+    return result
+
+
+def _check_mssql_partition(engine, table_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Check partition information for SQL Server tables."""
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        # Check if table uses a partition scheme
+        partition_check = conn.execute(text("""
+            SELECT
+                ps.name as partition_scheme,
+                pf.name as partition_function,
+                c.name as column_name
+            FROM sys.tables t
+            JOIN sys.indexes i ON t.object_id = i.object_id AND i.index_id <= 1
+            JOIN sys.partition_schemes ps ON i.data_space_id = ps.data_space_id
+            JOIN sys.partition_functions pf ON ps.function_id = pf.function_id
+            JOIN sys.index_columns ic ON i.object_id = ic.object_id
+                AND i.index_id = ic.index_id AND ic.partition_ordinal > 0
+            JOIN sys.columns c ON t.object_id = c.object_id AND ic.column_id = c.column_id
+            WHERE t.name = :table_name
+        """), {"table_name": table_name})
+
+        row = partition_check.fetchone()
+        if row:
+            result['is_partitioned'] = True
+            result['partition_type'] = 'RANGE'  # SQL Server primarily uses range partitioning
+            result['partition_columns'] = [row[2]]
+
+            # Get partition boundary values
+            partitions = conn.execute(text("""
+                SELECT
+                    p.partition_number,
+                    prv.value as boundary_value
+                FROM sys.tables t
+                JOIN sys.indexes i ON t.object_id = i.object_id AND i.index_id <= 1
+                JOIN sys.partitions p ON i.object_id = p.object_id AND i.index_id = p.index_id
+                JOIN sys.partition_schemes ps ON i.data_space_id = ps.data_space_id
+                JOIN sys.partition_functions pf ON ps.function_id = pf.function_id
+                LEFT JOIN sys.partition_range_values prv
+                    ON pf.function_id = prv.function_id AND p.partition_number = prv.boundary_id + 1
+                WHERE t.name = :table_name
+                ORDER BY p.partition_number
+            """), {"table_name": table_name})
+            result['partitions'] = [
+                {'name': f"partition_{r[0]}", 'bound': str(r[1]) if r[1] is not None else None}
+                for r in partitions.fetchall()
+            ]
+
+    return result
+
+
+def perform_partition_maintenance(
+    connection_url: str,
+    table_name: str,
+    partition_info: Dict[str, Any],
+    source_data: pd.DataFrame
+) -> bool:
+    """
+    Perform partition maintenance to ensure partitions exist for incoming data.
+
+    This function analyzes the source data and creates any necessary partitions
+    in the target table before data is copied. The maintenance operations are
+    database-specific and handle different partitioning strategies.
+
+    Args:
+        connection_url: Target database connection URL
+        table_name: Target table name
+        partition_info: Partition information from check_table_partitioned()
+        source_data: Source DataFrame to be copied
+
+    Returns:
+        True if maintenance was successful or not needed, False if it failed
+    """
+    if not partition_info.get('is_partitioned'):
+        return True  # Nothing to do for non-partitioned tables
+
+    db_type = partition_info.get('database_type', 'unknown')
+    partition_columns = partition_info.get('partition_columns', [])
+    partition_type = partition_info.get('partition_type', '')
+    existing_partitions = partition_info.get('partitions', [])
+
+    if not partition_columns:
+        safe_print(f"⚠ Partitioned table {table_name} has no partition columns defined, skipping maintenance")
+        return True
+
+    # Check if partition columns exist in source data
+    missing_cols = [col for col in partition_columns if col.lower() not in [c.lower() for c in source_data.columns]]
+    if missing_cols:
+        safe_print(f"⚠ Source data missing partition columns {missing_cols}, skipping partition maintenance")
+        return True
+
+    safe_print(f"🔧 Performing partition maintenance for {table_name} ({partition_type} on {partition_columns})")
+
+    try:
+        engine = create_engine(connection_url)
+
+        if db_type == 'postgresql':
+            return _maintain_postgresql_partitions(
+                engine, table_name, partition_type, partition_columns,
+                existing_partitions, source_data
+            )
+        elif db_type == 'oracle':
+            return _maintain_oracle_partitions(
+                engine, table_name, partition_type, partition_columns,
+                existing_partitions, source_data
+            )
+        elif db_type == 'mysql':
+            return _maintain_mysql_partitions(
+                engine, table_name, partition_type, partition_columns,
+                existing_partitions, source_data
+            )
+        elif db_type == 'mssql':
+            # SQL Server partition maintenance requires more complex setup
+            # and is typically done through partition switching, not dynamic creation
+            safe_print(f"ℹ️ SQL Server partition maintenance is handled by the partition function")
+            return True
+        else:
+            safe_print(f"⚠ Partition maintenance not implemented for {db_type}")
+            return True
+
+    except Exception as e:
+        safe_print(f"⚠ Partition maintenance failed for {table_name}: {str(e)}")
+        return False
+
+
+def _maintain_postgresql_partitions(
+    engine,
+    table_name: str,
+    partition_type: str,
+    partition_columns: List[str],
+    existing_partitions: List[Dict],
+    source_data: pd.DataFrame
+) -> bool:
+    """Create missing PostgreSQL partitions for incoming data."""
+    from sqlalchemy import text
+
+    # Get the partition column from source data (case-insensitive match)
+    part_col = None
+    for col in source_data.columns:
+        if col.lower() == partition_columns[0].lower():
+            part_col = col
+            break
+
+    if part_col is None:
+        return True
+
+    existing_names = {p['name'] for p in existing_partitions}
+
+    with engine.connect() as conn:
+        if partition_type == 'RANGE':
+            # For RANGE partitions, create partitions for date ranges in source data
+            if pd.api.types.is_datetime64_any_dtype(source_data[part_col]):
+                # Get unique months/years from source data
+                dates = pd.to_datetime(source_data[part_col].dropna())
+                if len(dates) > 0:
+                    periods = dates.dt.to_period('M').unique()
+                    for period in periods:
+                        partition_name = f"{table_name}_{period.strftime('%Y_%m')}"
+                        if partition_name not in existing_names:
+                            start_date = period.start_time.strftime('%Y-%m-%d')
+                            end_date = (period + 1).start_time.strftime('%Y-%m-%d')
+                            try:
+                                conn.execute(text(f"""
+                                    CREATE TABLE IF NOT EXISTS {partition_name}
+                                    PARTITION OF {table_name}
+                                    FOR VALUES FROM ('{start_date}') TO ('{end_date}')
+                                """))
+                                conn.commit()
+                                safe_print(f"  ✓ Created partition {partition_name}")
+                            except Exception as e:
+                                if 'already exists' not in str(e).lower():
+                                    safe_print(f"  ⚠ Could not create partition {partition_name}: {e}")
+
+        elif partition_type == 'LIST':
+            # For LIST partitions, create partitions for unique values
+            unique_values = source_data[part_col].dropna().unique()
+            for value in unique_values:
+                partition_name = f"{table_name}_{str(value).replace(' ', '_').replace('-', '_')[:50]}"
+                if partition_name not in existing_names:
+                    try:
+                        if isinstance(value, str):
+                            conn.execute(text(f"""
+                                CREATE TABLE IF NOT EXISTS {partition_name}
+                                PARTITION OF {table_name}
+                                FOR VALUES IN ('{value}')
+                            """))
+                        else:
+                            conn.execute(text(f"""
+                                CREATE TABLE IF NOT EXISTS {partition_name}
+                                PARTITION OF {table_name}
+                                FOR VALUES IN ({value})
+                            """))
+                        conn.commit()
+                        safe_print(f"  ✓ Created partition {partition_name}")
+                    except Exception as e:
+                        if 'already exists' not in str(e).lower():
+                            safe_print(f"  ⚠ Could not create partition {partition_name}: {e}")
+
+    return True
+
+
+def _maintain_oracle_partitions(
+    engine,
+    table_name: str,
+    partition_type: str,
+    partition_columns: List[str],
+    existing_partitions: List[Dict],
+    source_data: pd.DataFrame
+) -> bool:
+    """Create missing Oracle partitions for incoming data."""
+    from sqlalchemy import text
+
+    # Get the partition column from source data (case-insensitive match)
+    part_col = None
+    for col in source_data.columns:
+        if col.lower() == partition_columns[0].lower():
+            part_col = col
+            break
+
+    if part_col is None:
+        return True
+
+    with engine.connect() as conn:
+        if partition_type == 'RANGE':
+            # For RANGE partitions, check if we need new partitions
+            if pd.api.types.is_datetime64_any_dtype(source_data[part_col]):
+                max_date = pd.to_datetime(source_data[part_col].dropna()).max()
+                if pd.notna(max_date):
+                    # Oracle often uses MAXVALUE for the last partition
+                    # Add a new partition if data exceeds existing bounds
+                    partition_name = f"P_{max_date.strftime('%Y%m')}"
+                    try:
+                        # Use ALTER TABLE to add partition
+                        conn.execute(text(f"""
+                            ALTER TABLE {table_name} ADD PARTITION {partition_name}
+                            VALUES LESS THAN (TO_DATE('{(max_date + pd.DateOffset(months=1)).strftime('%Y-%m-01')}', 'YYYY-MM-DD'))
+                        """))
+                        conn.commit()
+                        safe_print(f"  ✓ Created partition {partition_name}")
+                    except Exception as e:
+                        # ORA-14074: partition bound must collate higher than that of the last partition
+                        # This is expected if partition already covers the range
+                        if 'ora-14074' not in str(e).lower() and 'already exists' not in str(e).lower():
+                            safe_print(f"  ℹ️ Partition creation note: {str(e)[:100]}")
+
+        elif partition_type == 'LIST':
+            # For LIST partitions, add new values
+            unique_values = source_data[part_col].dropna().unique()
+            for value in unique_values:
+                partition_name = f"P_{str(value).replace(' ', '_')[:20]}"
+                try:
+                    if isinstance(value, str):
+                        conn.execute(text(f"""
+                            ALTER TABLE {table_name} ADD PARTITION {partition_name}
+                            VALUES ('{value}')
+                        """))
+                    else:
+                        conn.execute(text(f"""
+                            ALTER TABLE {table_name} ADD PARTITION {partition_name}
+                            VALUES ({value})
+                        """))
+                    conn.commit()
+                    safe_print(f"  ✓ Created partition {partition_name}")
+                except Exception as e:
+                    if 'already exists' not in str(e).lower():
+                        pass  # Silently skip if value already in a partition
+
+    return True
+
+
+def _maintain_mysql_partitions(
+    engine,
+    table_name: str,
+    partition_type: str,
+    partition_columns: List[str],
+    existing_partitions: List[Dict],
+    source_data: pd.DataFrame
+) -> bool:
+    """Create missing MySQL partitions for incoming data."""
+    from sqlalchemy import text
+
+    # Get the partition column from source data (case-insensitive match)
+    part_col = None
+    for col in source_data.columns:
+        if col.lower() == partition_columns[0].lower():
+            part_col = col
+            break
+
+    if part_col is None:
+        return True
+
+    with engine.connect() as conn:
+        if partition_type in ('RANGE', 'RANGE COLUMNS'):
+            if pd.api.types.is_datetime64_any_dtype(source_data[part_col]):
+                max_date = pd.to_datetime(source_data[part_col].dropna()).max()
+                if pd.notna(max_date):
+                    partition_name = f"p{max_date.strftime('%Y%m')}"
+                    next_month = (max_date + pd.DateOffset(months=1)).strftime('%Y-%m-01')
+                    try:
+                        conn.execute(text(f"""
+                            ALTER TABLE {table_name} ADD PARTITION (
+                                PARTITION {partition_name} VALUES LESS THAN ('{next_month}')
+                            )
+                        """))
+                        conn.commit()
+                        safe_print(f"  ✓ Created partition {partition_name}")
+                    except Exception as e:
+                        if 'already exists' not in str(e).lower() and 'duplicate' not in str(e).lower():
+                            safe_print(f"  ℹ️ Partition note: {str(e)[:100]}")
+
+        elif partition_type in ('LIST', 'LIST COLUMNS'):
+            unique_values = source_data[part_col].dropna().unique()
+            for value in unique_values:
+                partition_name = f"p_{str(value).replace(' ', '_')[:20]}"
+                try:
+                    if isinstance(value, str):
+                        conn.execute(text(f"""
+                            ALTER TABLE {table_name} ADD PARTITION (
+                                PARTITION {partition_name} VALUES IN ('{value}')
+                            )
+                        """))
+                    else:
+                        conn.execute(text(f"""
+                            ALTER TABLE {table_name} ADD PARTITION (
+                                PARTITION {partition_name} VALUES IN ({value})
+                            )
+                        """))
+                    conn.commit()
+                    safe_print(f"  ✓ Created partition {partition_name}")
+                except Exception as e:
+                    if 'already exists' not in str(e).lower() and 'duplicate' not in str(e).lower():
+                        pass  # Silently skip
+
+    return True
+
+
 def process_in_parallel(func, items: List[Any], max_workers: int) -> List[Any]:
     """Process items in parallel using the provided function.
 
@@ -929,6 +1445,17 @@ def copy_db_to_db(
                     # If we can't get column mapping, proceed without it
                     pass
 
+        # Check if target table is partitioned and cache partition info
+        # This is done once before data copy starts
+        partition_info: Optional[Dict[str, Any]] = None
+        if check_table_exists(target_url, table):
+            partition_info = check_table_partitioned(target_url, table)
+            if partition_info.get('is_partitioned'):
+                safe_print(
+                    f"ℹ️ Target table '{table}' is partitioned "
+                    f"({partition_info.get('partition_type')} on {partition_info.get('partition_columns')})"
+                )
+
         # Execute query and write to target
         overall_start_ts: Optional[datetime] = None
         overall_start_perf: Optional[float] = None
@@ -954,6 +1481,9 @@ def copy_db_to_db(
             overall_start_ts = datetime.now()
             overall_start_perf = time.perf_counter()
 
+            # Track if partition maintenance has been performed for this copy operation
+            partition_maintenance_done = False
+
             if not parallel_workers or parallel_workers <= 1:
                 # Sequential path (no parallelism requested)
                 for chunk in result_iter:
@@ -962,6 +1492,12 @@ def copy_db_to_db(
 
                     # Filter columns to match target table schema
                     filtered_chunk = filter_dataframe_columns(chunk, column_mapping)
+
+                    # Perform partition maintenance before first write if table is partitioned
+                    if batch_number == 1 and partition_info and partition_info.get('is_partitioned'):
+                        if not partition_maintenance_done:
+                            perform_partition_maintenance(target_url, table, partition_info, filtered_chunk)
+                            partition_maintenance_done = True
 
                     start_ts = datetime.now()
                     start_perf = time.perf_counter()
@@ -990,6 +1526,12 @@ def copy_db_to_db(
                     batch_number = 1
                     # Filter columns to match target table schema
                     filtered_first_chunk = filter_dataframe_columns(first_chunk, column_mapping)
+
+                    # Perform partition maintenance before first write if table is partitioned
+                    if partition_info and partition_info.get('is_partitioned'):
+                        if not partition_maintenance_done:
+                            perform_partition_maintenance(target_url, table, partition_info, filtered_first_chunk)
+                            partition_maintenance_done = True
 
                     start_ts = datetime.now()
                     start_perf = time.perf_counter()
@@ -1087,6 +1629,10 @@ def copy_db_to_db(
 
             # Filter columns to match target table schema
             filtered_result = filter_dataframe_columns(result, column_mapping)
+
+            # Perform partition maintenance before writing if table is partitioned
+            if partition_info and partition_info.get('is_partitioned'):
+                perform_partition_maintenance(target_url, table, partition_info, filtered_result)
 
             overall_start_ts = datetime.now()
             overall_start_perf = time.perf_counter()
