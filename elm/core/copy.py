@@ -468,20 +468,69 @@ def _create_mssql_table_direct(engine, table_name: str, source_data: pd.DataFram
         conn.commit()
 
 
+def get_column_mapping(
+    source_data: pd.DataFrame,
+    target_url: str,
+    table_name: str
+) -> Optional[List[str]]:
+    """
+    Get the mapping of columns that exist in both source data and target table.
+
+    This function returns the list of column names (in source DataFrame case)
+    that should be used when copying data. Only columns that exist in BOTH
+    the source query result set AND the target table schema are included.
+
+    Args:
+        source_data: Source DataFrame with column names from query result
+        target_url: Target database connection URL
+        table_name: Target table name
+
+    Returns:
+        List of column names to use for data copy, or None if table doesn't exist.
+        Columns are returned in the order they appear in the source DataFrame.
+    """
+    # Check if table exists
+    if not check_table_exists(target_url, table_name):
+        return None
+
+    # Get target table columns (lowercased)
+    target_columns_lower = set(get_table_columns(target_url, table_name) or [])
+
+    if not target_columns_lower:
+        return None
+
+    # Get source columns and find intersection (preserve source column order and case)
+    # Map each source column to its lowercased version for comparison
+    mapped_columns = []
+    for col in source_data.columns:
+        if col.lower() in target_columns_lower:
+            mapped_columns.append(col)
+
+    return mapped_columns if mapped_columns else None
+
+
 def validate_target_table(
     source_data: pd.DataFrame,
     target_url: str,
     table_name: str,
     create_if_not_exists: bool = False
-) -> None:
+) -> Optional[List[str]]:
     """
-    Validate that the target table exists and has all required columns.
+    Validate that the target table exists and determine column mapping.
+
+    When the target table exists, this function returns the list of columns
+    that exist in BOTH the source data AND the target table. Extra columns
+    in the source that don't exist in the target are silently excluded.
 
     Args:
         source_data: Source DataFrame for column validation
         target_url: Target database connection URL
         table_name: Target table name
         create_if_not_exists: Whether to create table if it doesn't exist
+
+    Returns:
+        List of column names to use for data copy (columns in both source and target),
+        or None if table was just created (use all source columns).
     """
     # Check if table exists
     if not check_table_exists(target_url, table_name):
@@ -501,22 +550,58 @@ def validate_target_table(
                 else:
                     # Use pandas to_sql for other databases
                     source_data.head(0).to_sql(table_name, engine, if_exists='fail', index=False)
-                return
+                # Return None to indicate all source columns should be used
+                return None
             except Exception as e:
                 raise CopyError(f"Failed to create table {table_name}: {str(e)}")
         else:
             raise CopyError(f"Target table {table_name} does not exist. Use create_if_not_exists=True to create it.")
 
-    # Check if all source columns exist in target
+    # Get column mapping (columns that exist in both source and target)
+    mapped_columns = get_column_mapping(source_data, target_url, table_name)
+
+    if not mapped_columns:
+        raise CopyError(f"No matching columns found between source data and target table {table_name}")
+
+    # Log info about column filtering if any columns are excluded
     source_columns = set(source_data.columns.str.lower())
     target_columns = set(get_table_columns(target_url, table_name) or [])
+    excluded_columns = source_columns - target_columns
 
-    if not target_columns:
-        raise CopyError(f"Could not retrieve columns for target table {table_name}")
+    if excluded_columns:
+        safe_print(
+            f"ℹ️ Column mapping: {len(mapped_columns)} columns will be copied. "
+            f"Excluded {len(excluded_columns)} source columns not in target: {', '.join(sorted(excluded_columns))}"
+        )
 
-    missing_columns = source_columns - target_columns
-    if missing_columns:
-        raise CopyError(f"Target table {table_name} is missing columns: {', '.join(missing_columns)}")
+    return mapped_columns
+
+
+def filter_dataframe_columns(
+    data: pd.DataFrame,
+    column_mapping: Optional[List[str]]
+) -> pd.DataFrame:
+    """
+    Filter a DataFrame to only include the columns in the mapping.
+
+    Args:
+        data: Source DataFrame to filter
+        column_mapping: List of column names to keep. If None, return original DataFrame.
+
+    Returns:
+        Filtered DataFrame with only the mapped columns
+    """
+    if column_mapping is None:
+        return data
+
+    # Filter to only include columns that exist in the mapping
+    # Use intersection to handle case where mapping has columns not in data
+    cols_to_keep = [col for col in column_mapping if col in data.columns]
+
+    if not cols_to_keep:
+        return data
+
+    return data[cols_to_keep]
 
 
 def process_in_parallel(func, items: List[Any], max_workers: int) -> List[Any]:
@@ -790,6 +875,10 @@ def copy_db_to_db(
         source_url = get_connection_url(source_env, source_encryption_key)
         target_url = get_connection_url(target_env, target_encryption_key)
 
+        # Column mapping for filtering source columns to match target table
+        # None means use all source columns (table doesn't exist or was just created)
+        column_mapping: Optional[List[str]] = None
+
         # Handle table creation if needed (before validation or data copy)
         if create_if_not_exists or validate_target:
             # Create database-specific sample query
@@ -812,9 +901,33 @@ def copy_db_to_db(
             try:
                 sample_data = execute_query(source_url, sample_query, None, None, False)  # Don't mask validation data
                 if len(sample_data) > 0:
-                    validate_target_table(sample_data, target_url, table, create_if_not_exists)
+                    # validate_target_table now returns the column mapping
+                    column_mapping = validate_target_table(sample_data, target_url, table, create_if_not_exists)
             except Exception as e:
                 raise CopyError(f"Error during validation: {str(e)}")
+        else:
+            # No validation requested, but still check if we need column mapping
+            # for an existing table
+            if check_table_exists(target_url, table):
+                # Create a sample query to get source columns
+                if 'mssql' in source_url.lower():
+                    if query.strip().upper().startswith('SELECT'):
+                        select_pos = query.upper().find('SELECT') + 6
+                        sample_query = query[:select_pos] + ' TOP 1' + query[select_pos:]
+                    else:
+                        sample_query = query
+                elif 'oracle' in source_url.lower():
+                    sample_query = f"SELECT * FROM ({query}) WHERE ROWNUM <= 1"
+                else:
+                    sample_query = f"{query} LIMIT 1"
+
+                try:
+                    sample_data = execute_query(source_url, sample_query, None, None, False)
+                    if len(sample_data) > 0:
+                        column_mapping = get_column_mapping(sample_data, target_url, table)
+                except Exception:
+                    # If we can't get column mapping, proceed without it
+                    pass
 
         # Execute query and write to target
         overall_start_ts: Optional[datetime] = None
@@ -847,9 +960,12 @@ def copy_db_to_db(
                     batch_number += 1
                     current_mode = mode_enum if batch_number == 1 else WriteMode.APPEND
 
+                    # Filter columns to match target table schema
+                    filtered_chunk = filter_dataframe_columns(chunk, column_mapping)
+
                     start_ts = datetime.now()
                     start_perf = time.perf_counter()
-                    records_written = write_to_db(chunk, target_url, table, mode=current_mode)
+                    records_written = write_to_db(filtered_chunk, target_url, table, mode=current_mode)
                     duration = time.perf_counter() - start_perf
                     end_ts = datetime.now()
 
@@ -872,9 +988,12 @@ def copy_db_to_db(
 
                 if first_chunk is not None:
                     batch_number = 1
+                    # Filter columns to match target table schema
+                    filtered_first_chunk = filter_dataframe_columns(first_chunk, column_mapping)
+
                     start_ts = datetime.now()
                     start_perf = time.perf_counter()
-                    records_written = write_to_db(first_chunk, target_url, table, mode=mode_enum)
+                    records_written = write_to_db(filtered_first_chunk, target_url, table, mode=mode_enum)
                     duration = time.perf_counter() - start_perf
                     end_ts = datetime.now()
 
@@ -901,9 +1020,12 @@ def copy_db_to_db(
                     batch_no = payload["batch_number"]
                     chunk_df = payload["data"]
 
+                    # Filter columns to match target table schema
+                    filtered_chunk_df = filter_dataframe_columns(chunk_df, column_mapping)
+
                     start = datetime.now()
                     start_perf_local = time.perf_counter()
-                    written = write_to_db(chunk_df, target_url, table, mode=WriteMode.APPEND)
+                    written = write_to_db(filtered_chunk_df, target_url, table, mode=WriteMode.APPEND)
                     duration_local = time.perf_counter() - start_perf_local
                     end = datetime.now()
 
@@ -963,9 +1085,12 @@ def copy_db_to_db(
                 apply_masks,
             )
 
+            # Filter columns to match target table schema
+            filtered_result = filter_dataframe_columns(result, column_mapping)
+
             overall_start_ts = datetime.now()
             overall_start_perf = time.perf_counter()
-            total_records = write_to_db(result, target_url, table, mode=mode_enum)
+            total_records = write_to_db(filtered_result, target_url, table, mode=mode_enum)
             overall_duration = time.perf_counter() - overall_start_perf
             overall_end_ts = datetime.now()
 

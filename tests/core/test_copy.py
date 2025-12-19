@@ -70,10 +70,12 @@ class TestCopyCore:
         with patch('elm.core.copy.get_connection_url') as mock_get_url, \
              patch('elm.core.copy.create_engine') as mock_create_engine, \
              patch('elm.core.copy.apply_masking') as mock_apply_masking, \
-             patch('elm.core.copy.write_to_db') as mock_write_db:
+             patch('elm.core.copy.write_to_db') as mock_write_db, \
+             patch('elm.core.copy.check_table_exists') as mock_check_table:
 
             mock_get_url.return_value = 'postgresql://user:pass@localhost:5432/db'
             mock_write_db.return_value = 2  # Return record count
+            mock_check_table.return_value = False  # Table doesn't exist, no column mapping needed
             mock_engine = MagicMock()
             mock_create_engine.return_value = mock_engine
             mock_connection = MagicMock()
@@ -680,21 +682,69 @@ class TestCopyUtilities:
         mock_check_table.return_value = True
         mock_get_columns.return_value = ['id', 'name', 'email', 'extra_column']
 
-        # Should not raise an exception
-        copy.validate_target_table(source_df, 'postgresql://user:pass@host:5432/db', 'test_table')
+        # Should return the mapped columns (columns in both source and target)
+        result = copy.validate_target_table(source_df, 'postgresql://user:pass@host:5432/db', 'test_table')
+        assert result == ['id', 'name', 'email']
 
     @patch('elm.core.copy.check_table_exists')
     @patch('elm.core.copy.get_table_columns')
-    def test_validate_target_table_missing_columns(self, mock_get_columns, mock_check_table):
-        """Test validating target table with missing columns."""
+    def test_validate_target_table_column_filtering(self, mock_get_columns, mock_check_table):
+        """Test validating target table filters out extra source columns."""
+        # Source has 3 columns, target only has 2 - should return only matching columns
         source_df = pd.DataFrame({'id': [1, 2], 'name': ['A', 'B'], 'email': ['a@test.com', 'b@test.com']})
         mock_check_table.return_value = True
-        mock_get_columns.return_value = ['id', 'name']  # Missing 'email' column
+        mock_get_columns.return_value = ['id', 'name']  # Target doesn't have 'email' column
 
-        with pytest.raises(CopyError) as exc_info:
-            copy.validate_target_table(source_df, 'postgresql://user:pass@host:5432/db', 'test_table')
+        # Should return only the columns that exist in both source and target
+        result = copy.validate_target_table(source_df, 'postgresql://user:pass@host:5432/db', 'test_table')
+        assert result == ['id', 'name']
+        assert 'email' not in result
 
-        assert "Target table test_table is missing columns: email" in str(exc_info.value)
+    @patch('elm.core.copy.check_table_exists')
+    @patch('elm.core.copy.get_table_columns')
+    def test_get_column_mapping_returns_matched_columns(self, mock_get_columns, mock_check_table):
+        """Test get_column_mapping returns only columns in both source and target."""
+        source_df = pd.DataFrame({'id': [1], 'name': ['A'], 'extra': ['X']})
+        mock_check_table.return_value = True
+        mock_get_columns.return_value = ['id', 'name', 'other']
+
+        result = copy.get_column_mapping(source_df, 'postgresql://user:pass@host:5432/db', 'test_table')
+        assert result == ['id', 'name']
+        assert 'extra' not in result
+        assert 'other' not in result
+
+    @patch('elm.core.copy.check_table_exists')
+    def test_get_column_mapping_returns_none_if_table_not_exists(self, mock_check_table):
+        """Test get_column_mapping returns None if table doesn't exist."""
+        source_df = pd.DataFrame({'id': [1], 'name': ['A']})
+        mock_check_table.return_value = False
+
+        result = copy.get_column_mapping(source_df, 'postgresql://user:pass@host:5432/db', 'test_table')
+        assert result is None
+
+    def test_filter_dataframe_columns_with_mapping(self):
+        """Test filter_dataframe_columns filters to only mapped columns."""
+        df = pd.DataFrame({'id': [1, 2], 'name': ['A', 'B'], 'extra': ['X', 'Y']})
+        column_mapping = ['id', 'name']
+
+        result = copy.filter_dataframe_columns(df, column_mapping)
+        assert list(result.columns) == ['id', 'name']
+        assert 'extra' not in result.columns
+
+    def test_filter_dataframe_columns_with_none_mapping(self):
+        """Test filter_dataframe_columns returns original df when mapping is None."""
+        df = pd.DataFrame({'id': [1, 2], 'name': ['A', 'B'], 'extra': ['X', 'Y']})
+
+        result = copy.filter_dataframe_columns(df, None)
+        assert list(result.columns) == ['id', 'name', 'extra']
+
+    def test_filter_dataframe_columns_preserves_order(self):
+        """Test filter_dataframe_columns preserves column order from mapping."""
+        df = pd.DataFrame({'c': [1], 'a': [2], 'b': [3]})
+        column_mapping = ['a', 'c']  # Different order than df
+
+        result = copy.filter_dataframe_columns(df, column_mapping)
+        assert list(result.columns) == ['a', 'c']
 
     def test_process_in_parallel_success(self):
         """Test processing items in parallel successfully."""
@@ -729,11 +779,13 @@ class TestCopyUtilities:
         with patch('elm.core.copy.get_connection_url') as mock_get_url, \
              patch('elm.core.copy.execute_query') as mock_execute, \
              patch('elm.core.copy.write_to_db') as mock_write_db, \
-             patch('elm.core.copy.process_in_parallel') as mock_parallel:
+             patch('elm.core.copy.process_in_parallel') as mock_parallel, \
+             patch('elm.core.copy.check_table_exists') as mock_check_table:
 
             mock_get_url.return_value = 'postgresql://user:pass@localhost:5432/db'
             mock_execute.return_value = iter([batch1, batch2, batch3])
             mock_write_db.return_value = 10
+            mock_check_table.return_value = False  # Table doesn't exist, no column mapping needed
 
             # Simulate parallel execution while keeping behaviour deterministic
             def fake_parallel(func, items, max_workers):
@@ -780,11 +832,13 @@ class TestCopyUtilities:
         with patch('elm.core.copy.get_connection_url') as mock_get_url, \
              patch('elm.core.copy.execute_query') as mock_execute, \
              patch('elm.core.streaming.write_oracle_executemany') as mock_oracle_exec, \
-             patch('elm.core.streaming._write_pandas_fallback') as mock_fallback:
+             patch('elm.core.streaming._write_pandas_fallback') as mock_fallback, \
+             patch('elm.core.copy.check_table_exists') as mock_check_table:
 
             # Use an Oracle-style URL so streaming detects the correct database type
             mock_get_url.return_value = 'oracle+oracledb://user:pass@localhost:1521/db'
             mock_execute.return_value = iter([batch1, batch2])
+            mock_check_table.return_value = False  # Table doesn't exist, no column mapping needed
 
             # Force the optimized Oracle path to fail so that fallback is used
             mock_oracle_exec.side_effect = Exception("optimized writer failed")
@@ -1209,7 +1263,7 @@ class TestCopyEdgeCases:
                     create_if_not_exists=False
                 )
 
-            assert "Could not retrieve columns" in str(exc_info.value)
+            assert "No matching columns found" in str(exc_info.value)
 
     def test_copy_db_to_file_with_batching(self):
         """Test copy database to file with batching."""
