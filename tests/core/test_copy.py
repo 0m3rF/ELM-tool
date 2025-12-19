@@ -1332,10 +1332,12 @@ class TestCopyEdgeCases:
         with patch('elm.core.copy.get_connection_url') as mock_get_url, \
              patch('elm.core.copy.execute_query') as mock_execute, \
              patch('elm.core.copy.write_to_db') as mock_write_db, \
-             patch('elm.core.copy.validate_target_table') as mock_validate:
+             patch('elm.core.copy.validate_target_table') as mock_validate, \
+             patch('elm.core.copy.check_table_exists') as mock_check_table:
 
             mock_get_url.return_value = 'postgresql://user:pass@localhost:5432/db'
             mock_write_db.return_value = 1  # Return record count per batch
+            mock_check_table.return_value = False  # Table doesn't exist, no column mapping needed
 
             # Mock validation query
             sample_data = pd.DataFrame({'id': [1], 'name': ['Sample']})
@@ -1382,3 +1384,506 @@ class TestCopyEdgeCases:
 
             assert result.success is False
             assert "Error during validation" in result.message
+
+
+class TestOraclePartitionFunctionality:
+    """Test cases for Oracle partition check and maintenance functionality."""
+
+    def test_check_oracle_partition_partitioned_table(self):
+        """Test checking Oracle partitioned table returns correct info."""
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+
+        # Mock partition check query - table is partitioned
+        mock_partition_check = MagicMock()
+        mock_partition_check.fetchone.return_value = ('YES',)
+
+        # Mock partition info query - RANGE partition on ORDER_DATE column
+        mock_part_info = MagicMock()
+        mock_part_info.fetchall.return_value = [
+            ('RANGE', 'ORDER_DATE'),
+        ]
+
+        # Mock existing partitions query
+        mock_partitions = MagicMock()
+        mock_partitions.fetchall.return_value = [
+            ('P_202301', "TO_DATE('2023-02-01', 'YYYY-MM-DD')"),
+            ('P_202302', "TO_DATE('2023-03-01', 'YYYY-MM-DD')"),
+        ]
+
+        # Configure execute to return different results for different queries
+        def execute_side_effect(query, params=None):
+            query_str = str(query)
+            if 'user_tables' in query_str.lower():
+                return mock_partition_check
+            elif 'user_part_tables' in query_str.lower():
+                return mock_part_info
+            elif 'user_tab_partitions' in query_str.lower():
+                return mock_partitions
+            return MagicMock()
+
+        mock_conn.execute.side_effect = execute_side_effect
+
+        initial_result = {
+            'is_partitioned': False,
+            'partition_type': None,
+            'partition_columns': None,
+            'partitions': None,
+            'database_type': 'oracle'
+        }
+
+        result = copy._check_oracle_partition(mock_engine, 'ORDERS', initial_result)
+
+        assert result['is_partitioned'] is True
+        assert result['partition_type'] == 'RANGE'
+        assert result['partition_columns'] == ['ORDER_DATE']
+        assert len(result['partitions']) == 2
+        assert result['partitions'][0]['name'] == 'P_202301'
+
+    def test_check_oracle_partition_non_partitioned_table(self):
+        """Test checking Oracle non-partitioned table returns correct info."""
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+
+        # Mock partition check query - table is NOT partitioned
+        mock_partition_check = MagicMock()
+        mock_partition_check.fetchone.return_value = ('NO',)
+
+        mock_conn.execute.return_value = mock_partition_check
+
+        initial_result = {
+            'is_partitioned': False,
+            'partition_type': None,
+            'partition_columns': None,
+            'partitions': None,
+            'database_type': 'oracle'
+        }
+
+        result = copy._check_oracle_partition(mock_engine, 'SIMPLE_TABLE', initial_result)
+
+        assert result['is_partitioned'] is False
+        assert result['partition_type'] is None
+        assert result['partition_columns'] is None
+
+    def test_check_oracle_partition_table_not_found(self):
+        """Test checking Oracle partition when table doesn't exist."""
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+
+        # Mock partition check query - no row returned (table doesn't exist)
+        mock_partition_check = MagicMock()
+        mock_partition_check.fetchone.return_value = None
+
+        mock_conn.execute.return_value = mock_partition_check
+
+        initial_result = {
+            'is_partitioned': False,
+            'partition_type': None,
+            'partition_columns': None,
+            'partitions': None,
+            'database_type': 'oracle'
+        }
+
+        result = copy._check_oracle_partition(mock_engine, 'NONEXISTENT_TABLE', initial_result)
+
+        assert result['is_partitioned'] is False
+
+    def test_check_oracle_partition_list_partition(self):
+        """Test checking Oracle LIST partitioned table."""
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+
+        # Mock partition check query - table is partitioned
+        mock_partition_check = MagicMock()
+        mock_partition_check.fetchone.return_value = ('YES',)
+
+        # Mock partition info query - LIST partition on REGION column
+        mock_part_info = MagicMock()
+        mock_part_info.fetchall.return_value = [
+            ('LIST', 'REGION'),
+        ]
+
+        # Mock existing partitions query
+        mock_partitions = MagicMock()
+        mock_partitions.fetchall.return_value = [
+            ('P_EAST', "'EAST'"),
+            ('P_WEST', "'WEST'"),
+            ('P_NORTH', "'NORTH'"),
+        ]
+
+        def execute_side_effect(query, params=None):
+            query_str = str(query)
+            if 'user_tables' in query_str.lower():
+                return mock_partition_check
+            elif 'user_part_tables' in query_str.lower():
+                return mock_part_info
+            elif 'user_tab_partitions' in query_str.lower():
+                return mock_partitions
+            return MagicMock()
+
+        mock_conn.execute.side_effect = execute_side_effect
+
+        initial_result = {
+            'is_partitioned': False,
+            'partition_type': None,
+            'partition_columns': None,
+            'partitions': None,
+            'database_type': 'oracle'
+        }
+
+        result = copy._check_oracle_partition(mock_engine, 'SALES_BY_REGION', initial_result)
+
+        assert result['is_partitioned'] is True
+        assert result['partition_type'] == 'LIST'
+        assert result['partition_columns'] == ['REGION']
+        assert len(result['partitions']) == 3
+
+    def test_maintain_oracle_partitions_range_datetime(self):
+        """Test Oracle partition maintenance for RANGE partition with datetime column."""
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+
+        # Create source data with datetime partition column
+        source_data = pd.DataFrame({
+            'id': [1, 2, 3],
+            'order_date': pd.to_datetime(['2024-03-15', '2024-03-20', '2024-03-25']),
+            'amount': [100.0, 200.0, 150.0]
+        })
+
+        partition_columns = ['ORDER_DATE']
+        existing_partitions = [
+            {'name': 'P_202401', 'bound': "TO_DATE('2024-02-01', 'YYYY-MM-DD')"},
+            {'name': 'P_202402', 'bound': "TO_DATE('2024-03-01', 'YYYY-MM-DD')"},
+        ]
+
+        with patch('elm.core.copy.safe_print'):
+            result = copy._maintain_oracle_partitions(
+                mock_engine,
+                'ORDERS',
+                'RANGE',
+                partition_columns,
+                existing_partitions,
+                source_data
+            )
+
+        assert result is True
+        # Should have attempted to execute ALTER TABLE to add partition
+        mock_conn.execute.assert_called()
+
+    def test_maintain_oracle_partitions_list_string(self):
+        """Test Oracle partition maintenance for LIST partition with string values."""
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+
+        # Create source data with string partition column
+        source_data = pd.DataFrame({
+            'id': [1, 2, 3],
+            'region': ['SOUTH', 'CENTRAL', 'SOUTH'],
+            'sales': [1000, 2000, 1500]
+        })
+
+        partition_columns = ['REGION']
+        existing_partitions = [
+            {'name': 'P_EAST', 'bound': "'EAST'"},
+            {'name': 'P_WEST', 'bound': "'WEST'"},
+        ]
+
+        with patch('elm.core.copy.safe_print'):
+            result = copy._maintain_oracle_partitions(
+                mock_engine,
+                'SALES',
+                'LIST',
+                partition_columns,
+                existing_partitions,
+                source_data
+            )
+
+        assert result is True
+        # Should have attempted to execute ALTER TABLE for SOUTH and CENTRAL
+        assert mock_conn.execute.call_count >= 2
+
+    def test_maintain_oracle_partitions_missing_column(self):
+        """Test Oracle partition maintenance when partition column is missing from data."""
+        mock_engine = MagicMock()
+
+        # Create source data WITHOUT the partition column
+        source_data = pd.DataFrame({
+            'id': [1, 2, 3],
+            'amount': [100.0, 200.0, 150.0]
+        })
+
+        partition_columns = ['ORDER_DATE']  # This column is NOT in source_data
+        existing_partitions = []
+
+        result = copy._maintain_oracle_partitions(
+            mock_engine,
+            'ORDERS',
+            'RANGE',
+            partition_columns,
+            existing_partitions,
+            source_data
+        )
+
+        # Should return True (skip gracefully) when column is missing
+        assert result is True
+
+    def test_maintain_oracle_partitions_case_insensitive_column_match(self):
+        """Test Oracle partition maintenance with case-insensitive column matching."""
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+
+        # Create source data with lowercase column name
+        source_data = pd.DataFrame({
+            'id': [1, 2],
+            'order_date': pd.to_datetime(['2024-05-15', '2024-05-20']),
+            'amount': [100.0, 200.0]
+        })
+
+        # Partition column in UPPERCASE (as Oracle typically returns)
+        partition_columns = ['ORDER_DATE']
+        existing_partitions = []
+
+        with patch('elm.core.copy.safe_print'):
+            result = copy._maintain_oracle_partitions(
+                mock_engine,
+                'ORDERS',
+                'RANGE',
+                partition_columns,
+                existing_partitions,
+                source_data
+            )
+
+        assert result is True
+        # Should have matched the column despite case difference
+        mock_conn.execute.assert_called()
+
+    def test_maintain_oracle_partitions_list_numeric(self):
+        """Test Oracle partition maintenance for LIST partition with numeric values."""
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+
+        # Create source data with numeric partition column
+        source_data = pd.DataFrame({
+            'id': [1, 2, 3],
+            'category_id': [10, 20, 10],
+            'product_name': ['Widget A', 'Widget B', 'Widget C']
+        })
+
+        partition_columns = ['CATEGORY_ID']
+        existing_partitions = [
+            {'name': 'P_CAT_1', 'bound': '1'},
+            {'name': 'P_CAT_5', 'bound': '5'},
+        ]
+
+        with patch('elm.core.copy.safe_print'):
+            result = copy._maintain_oracle_partitions(
+                mock_engine,
+                'PRODUCTS',
+                'LIST',
+                partition_columns,
+                existing_partitions,
+                source_data
+            )
+
+        assert result is True
+        # Should have attempted to add partitions for values 10 and 20
+        assert mock_conn.execute.call_count >= 2
+
+    def test_maintain_oracle_partitions_handles_ora14074_error(self):
+        """Test Oracle partition maintenance handles ORA-14074 gracefully."""
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+
+        # Simulate ORA-14074 error (partition bound must collate higher)
+        mock_conn.execute.side_effect = Exception("ORA-14074: partition bound must collate higher than that of the last partition")
+
+        source_data = pd.DataFrame({
+            'id': [1],
+            'order_date': pd.to_datetime(['2024-01-15']),
+            'amount': [100.0]
+        })
+
+        partition_columns = ['ORDER_DATE']
+        existing_partitions = []
+
+        with patch('elm.core.copy.safe_print'):
+            result = copy._maintain_oracle_partitions(
+                mock_engine,
+                'ORDERS',
+                'RANGE',
+                partition_columns,
+                existing_partitions,
+                source_data
+            )
+
+        # Should return True even when ORA-14074 occurs (expected for existing range)
+        assert result is True
+
+    def test_check_table_partitioned_oracle_detection(self):
+        """Test check_table_partitioned correctly detects Oracle database."""
+        with patch('elm.core.copy.detect_database_type') as mock_detect, \
+             patch('elm.core.copy.create_engine') as mock_create_engine, \
+             patch('elm.core.copy._check_oracle_partition') as mock_check_oracle:
+
+            mock_detect.return_value = 'oracle'
+            mock_engine = MagicMock()
+            mock_create_engine.return_value = mock_engine
+
+            # Mock Oracle partition check to return partitioned result
+            mock_check_oracle.return_value = {
+                'is_partitioned': True,
+                'partition_type': 'RANGE',
+                'partition_columns': ['ORDER_DATE'],
+                'partitions': [{'name': 'P_202401', 'bound': 'some_bound'}],
+                'database_type': 'oracle'
+            }
+
+            result = copy.check_table_partitioned(
+                'oracle+oracledb://user:pass@host:1521/?service_name=XE',
+                'ORDERS'
+            )
+
+            assert result['is_partitioned'] is True
+            assert result['database_type'] == 'oracle'
+            mock_check_oracle.assert_called_once()
+
+    def test_perform_partition_maintenance_oracle(self):
+        """Test perform_partition_maintenance calls Oracle maintenance for Oracle tables."""
+        partition_info = {
+            'is_partitioned': True,
+            'partition_type': 'RANGE',
+            'partition_columns': ['ORDER_DATE'],
+            'partitions': [],
+            'database_type': 'oracle'
+        }
+
+        source_data = pd.DataFrame({
+            'id': [1, 2],
+            'order_date': pd.to_datetime(['2024-06-15', '2024-06-20']),
+            'amount': [100.0, 200.0]
+        })
+
+        with patch('elm.core.copy.create_engine') as mock_create_engine, \
+             patch('elm.core.copy._maintain_oracle_partitions') as mock_maintain_oracle, \
+             patch('elm.core.copy.safe_print'):
+
+            mock_engine = MagicMock()
+            mock_create_engine.return_value = mock_engine
+            mock_maintain_oracle.return_value = True
+
+            result = copy.perform_partition_maintenance(
+                'oracle+oracledb://user:pass@host:1521/?service_name=XE',
+                'ORDERS',
+                partition_info,
+                source_data
+            )
+
+            assert result is True
+            mock_maintain_oracle.assert_called_once()
+
+    def test_perform_partition_maintenance_non_partitioned_table(self):
+        """Test perform_partition_maintenance skips non-partitioned tables."""
+        partition_info = {
+            'is_partitioned': False,
+            'partition_type': None,
+            'partition_columns': None,
+            'partitions': None,
+            'database_type': 'oracle'
+        }
+
+        source_data = pd.DataFrame({
+            'id': [1, 2],
+            'name': ['Alice', 'Bob']
+        })
+
+        # Should return True immediately without any DB operations
+        result = copy.perform_partition_maintenance(
+            'oracle+oracledb://user:pass@host:1521/?service_name=XE',
+            'SIMPLE_TABLE',
+            partition_info,
+            source_data
+        )
+
+        assert result is True
+
+    def test_perform_partition_maintenance_missing_partition_columns(self):
+        """Test perform_partition_maintenance handles missing partition columns in source data."""
+        partition_info = {
+            'is_partitioned': True,
+            'partition_type': 'RANGE',
+            'partition_columns': ['ORDER_DATE'],
+            'partitions': [],
+            'database_type': 'oracle'
+        }
+
+        # Source data does NOT contain ORDER_DATE column
+        source_data = pd.DataFrame({
+            'id': [1, 2],
+            'amount': [100.0, 200.0]
+        })
+
+        with patch('elm.core.copy.safe_print'):
+            result = copy.perform_partition_maintenance(
+                'oracle+oracledb://user:pass@host:1521/?service_name=XE',
+                'ORDERS',
+                partition_info,
+                source_data
+            )
+
+        # Should return True (skip gracefully)
+        assert result is True
+
+    def test_copy_db_to_db_with_oracle_partitioned_table(self):
+        """Test copy_db_to_db integrates partition maintenance for Oracle."""
+        with patch('elm.core.copy.get_connection_url') as mock_get_url, \
+             patch('elm.core.copy.execute_query') as mock_execute, \
+             patch('elm.core.copy.write_to_db') as mock_write_db, \
+             patch('elm.core.copy.check_table_exists') as mock_check_table, \
+             patch('elm.core.copy.check_table_partitioned') as mock_check_partition, \
+             patch('elm.core.copy.perform_partition_maintenance') as mock_maintain, \
+             patch('elm.core.copy.apply_masking') as mock_apply_masking:
+
+            mock_get_url.return_value = 'oracle+oracledb://user:pass@host:1521/?service_name=XE'
+            mock_check_table.return_value = True
+            mock_check_partition.return_value = {
+                'is_partitioned': True,
+                'partition_type': 'RANGE',
+                'partition_columns': ['ORDER_DATE'],
+                'partitions': [],
+                'database_type': 'oracle'
+            }
+            mock_maintain.return_value = True
+
+            # Mock query result
+            mock_df = pd.DataFrame({
+                'id': [1, 2],
+                'order_date': pd.to_datetime(['2024-07-15', '2024-07-20']),
+                'amount': [100.0, 200.0]
+            })
+            mock_execute.return_value = mock_df
+            mock_apply_masking.return_value = mock_df
+            mock_write_db.return_value = 2
+
+            result = copy.copy_db_to_db(
+                source_env='source-env',
+                target_env='target-env',
+                query='SELECT * FROM source_orders',
+                table='ORDERS',
+                mode='APPEND',
+                apply_masks=False
+            )
+
+            assert result.success is True
+            # Verify partition check was called
+            mock_check_partition.assert_called_once()
+            # Verify partition maintenance was called before write
+            mock_maintain.assert_called_once()
