@@ -87,6 +87,7 @@ class TestMainCLI:
         assert 'copy' in result.output
         assert 'mask' in result.output
         assert 'generate' in result.output
+        assert 'sync' in result.output
 
     def test_cli_aliases(self, runner):
         """Test CLI command aliases work correctly."""
@@ -114,6 +115,11 @@ class TestMainCLI:
         result = runner.invoke(cli, ['cfg', '--help'])
         assert result.exit_code == 0
         assert 'Configuration management commands' in result.output
+
+        # Test sync alias
+        result = runner.invoke(cli, ['syn', '--help'])
+        assert result.exit_code == 0
+        assert 'Synchronization commands' in result.output
 
     def test_main_entry_point(self, runner):
         """Test the main entry point functionality."""
