@@ -1,5 +1,5 @@
 import click, os
-from elm.elm_commands import environment, mask, copy, generate, config
+from elm.elm_commands import environment, mask, copy, generate, config, sync
 from elm.elm_utils import venv, variables
 from elm.elm_utils.command_utils import AliasedGroup
 
@@ -19,6 +19,7 @@ cli.add_command(copy.copy)
 cli.add_command(mask.mask)
 cli.add_command(generate.generate)
 cli.add_command(config.config)
+cli.add_command(sync.sync)
 
 # Define aliases for main commands
 ALIASES = {
@@ -26,7 +27,8 @@ ALIASES = {
     'cpy': copy.copy,
     'msk': mask.mask,
     'gen': generate.generate,
-    'cfg': config.config
+    'cfg': config.config,
+    'syn': sync.sync,
 }
 
 if __name__ == '__main__':
