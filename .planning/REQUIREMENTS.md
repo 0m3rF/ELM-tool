@@ -7,8 +7,8 @@
 
 ### Integration and Launch
 
-- [ ] **BOOT-01**: GUI automatically launches via `CustomTkinter` when the user invokes the main CLI entrypoint without any arguments.
-- [ ] **BOOT-02**: GUI terminates completely when the user closes the root window.
+- [x] **BOOT-01**: GUI automatically launches via `CustomTkinter` when the user invokes the main CLI entrypoint without any arguments.
+- [x] **BOOT-02**: GUI terminates completely when the user closes the root window.
 
 ### Environment Management
 
@@ -46,8 +46,8 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BOOT-01 | Phase 1 | Pending |
-| BOOT-02 | Phase 1 | Pending |
+| BOOT-01 | Phase 1 | Complete |
+| BOOT-02 | Phase 1 | Complete |
 | ENV-01 | Phase 2 | Pending |
 | ENV-02 | Phase 2 | Pending |
 | ENV-03 | Phase 2 | Pending |
