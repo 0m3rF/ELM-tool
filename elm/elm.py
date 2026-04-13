@@ -1,4 +1,4 @@
-import click, os
+import click, os, sys
 from elm.elm_commands import environment, mask, copy, generate, config, sync
 from elm.elm_utils import venv, variables
 from elm.elm_utils.command_utils import AliasedGroup
@@ -31,6 +31,18 @@ ALIASES = {
     'syn': sync.sync,
 }
 
+def _should_launch_gui():
+    """Return True if CLI was invoked with no arguments (GUI trigger)."""
+    return len(sys.argv) == 1
+
+def main():
+    """Entrypoint wrapper: launches GUI if no args, else runs CLI."""
+    if _should_launch_gui():
+        from elm.gui.app import launch
+        launch()
+    else:
+        cli()
+
 if __name__ == '__main__':
     venv.create_and_activate_venv(variables.VENV_DIR)
-    cli()
+    main()
