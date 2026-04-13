@@ -22,6 +22,7 @@ keywords = [
 ]
 dependencies = [
     "click>=8.0.0",
+    "customtkinter>=5.2.0",
     "cryptography>=3.4.7",
     "sqlalchemy>=2.0.0",
     "pandas>=2.0.0",
@@ -39,7 +40,7 @@ mssql = ["pyodbc>=4.0.34"]
 all-db = ["psycopg2-binary>=2.9.1", "oracledb>=1.0.0", "pymysql>=1.0.2", "pyodbc>=4.0.34"]
 
 [project.scripts]
-elm-tool = "elm.elm:cli"
+elm-tool = "elm.elm:main"
 
 [project.urls]
 Homepage = "https://github.com/0m3rF/ELM-tool"
