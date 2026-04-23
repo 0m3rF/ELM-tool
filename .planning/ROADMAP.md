@@ -2,23 +2,37 @@
 
 **Granularity:** Standard
 
-## Phase 1: Foundation & GUI Bootstrap
-**Goal:** Integrate CustomTkinter into the CLI entrypoint without breaking existing headless functionality.
-- [ ] Intercept empty arguments in `elm.py` to trigger GUI launch.
-- [ ] Set up CustomTkinter root window and basic tabbed layout (Environments, Operations).
-- [ ] Connect window closed protocol to cleanly terminate the process.
-**Covers:** BOOT-01, BOOT-02
+## Milestones
 
-## Phase 2: Environment Management Visuals
-**Goal:** Create forms to list, add, edit, and delete environments perfectly mirroring CLI capabilities.
-- [x] Build environment listing UI (scrollable list with selection highlight).
-- [x] Build form fields (Host, Port, User, Pass, DB, etc.) for adding/editing environments.
-- [x] Connect form buttons to core `elm/core/environment.py` operations.
-**Covers:** ENV-01, ENV-02, ENV-03, ENV-04
+- ✅ **v1.0 MVP** — Phases 1-3 (shipped 2026-04-24)
 
-## Phase 3: Execution Engine & Log Streaming
-**Goal:** Build the execution thread and connect `sys.stdout` streaming to an observable log panel.
-- [x] Build the Copy Operation visual form (Source, Target, Execution Buttons).
-- [x] Implement `threading` and `queue.Queue` to run `elm/core` commands without blocking the main event loop.
-- [x] Implement the persistent log panel (`CTkTextbox`) and consume the queue to display logs natively in real-time.
-**Covers:** EXEC-01, EXEC-02, EXEC-03, MON-01, MON-02
+## Phases
+
+<details>
+<summary>✅ v1.0 MVP (Phases 1-3) — SHIPPED 2026-04-24</summary>
+
+- [x] Phase 1: Foundation & GUI Bootstrap (1/1 plans) — completed 2026-04-14
+  - Intercept empty arguments in `elm.py` to trigger GUI launch
+  - CustomTkinter root window with tabbed layout (Environments, Operations)
+  - Window closed protocol cleanly terminates process
+  - **Covers:** BOOT-01, BOOT-02
+- [x] Phase 2: Environment Management Visuals (1/1 plans) — completed 2026-04-23
+  - Scrollable environment list with selection highlight
+  - Full form for adding/editing environments (write-only passwords)
+  - Connection testing and delete confirmation
+  - **Covers:** ENV-01, ENV-02, ENV-03, ENV-04
+- [x] Phase 3: Execution Engine & Log Streaming (1/1 plans) — completed 2026-04-23
+  - Copy Operation visual form with Source/Target dropdowns
+  - Background threading with `queue.Queue` stdout redirect
+  - Persistent log panel with real-time streaming
+  - **Covers:** EXEC-01, EXEC-02, EXEC-03, MON-01, MON-02
+
+</details>
+
+## Progress
+
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|-----------------|--------|-----------|
+| 1. Foundation & GUI Bootstrap | v1.0 | 1/1 | Complete | 2026-04-14 |
+| 2. Environment Management Visuals | v1.0 | 1/1 | Complete | 2026-04-23 |
+| 3. Execution Engine & Log Streaming | v1.0 | 1/1 | Complete | 2026-04-24 |
