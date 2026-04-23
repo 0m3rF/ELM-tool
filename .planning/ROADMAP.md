@@ -18,7 +18,7 @@
 
 ## Phase 3: Execution Engine & Log Streaming
 **Goal:** Build the execution thread and connect `sys.stdout` streaming to an observable log panel.
-- [ ] Build the Copy Operation visual form (Source, Target, Execution Buttons).
-- [ ] Implement `threading` and `queue.Queue` to run `elm/core` commands without blocking the main event loop.
-- [ ] Implement the persistent log panel (`CTkTextbox`) and consume the queue to display logs natively in real-time.
+- [x] Build the Copy Operation visual form (Source, Target, Execution Buttons).
+- [x] Implement `threading` and `queue.Queue` to run `elm/core` commands without blocking the main event loop.
+- [x] Implement the persistent log panel (`CTkTextbox`) and consume the queue to display logs natively in real-time.
 **Covers:** EXEC-01, EXEC-02, EXEC-03, MON-01, MON-02
