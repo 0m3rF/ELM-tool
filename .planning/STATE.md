@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 
 | Phase | Milestone | Status |
 |-------|-----------|--------|
-| 1 | Foundation & GUI Bootstrap | Pending |
-| 2 | Environment Management Visuals | Pending |
+| 1 | Foundation & GUI Bootstrap | Complete |
+| 2 | Environment Management Visuals | Complete |
 | 3 | Execution Engine & Log Streaming | Pending |
 
 ## Active Context
 
-(Project initialized. Ready for Phase 1.)
+Phase 02 complete. Environment management GUI implemented with split-pane layout, CRUD forms, write-only password handling, and on-demand connection testing. Ready for Phase 3.

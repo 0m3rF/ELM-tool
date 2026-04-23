@@ -54,13 +54,10 @@ class ELMApp(ctk.CTk):
         # Set default active tab
         self.tabview.set("🌐  Environments")
 
-        # Placeholder labels (will be replaced in Phase 2 and 3)
-        env_label = ctk.CTkLabel(
-            self.tabview.tab("🌐  Environments"),
-            text="Environment management will appear here.",
-            font=("", 14),
-        )
-        env_label.pack(expand=True)
+        # Environment Manager (Phase 2)
+        from elm.gui.environment_manager import EnvironmentManagerFrame
+        self.env_manager = EnvironmentManagerFrame(self.tabview.tab("🌐  Environments"))
+        self.env_manager.pack(fill="both", expand=True)
 
         ops_label = ctk.CTkLabel(
             self.tabview.tab("⚙  Operations"),

@@ -11,9 +11,9 @@
 
 ## Phase 2: Environment Management Visuals
 **Goal:** Create forms to list, add, edit, and delete environments perfectly mirroring CLI capabilities.
-- [ ] Build environment listing UI (e.g., dropdowns or listbox).
-- [ ] Build form fields (Host, Port, User, Pass, DB, etc.) for adding/editing environments.
-- [ ] Connect form buttons to core `elm/core/environment.py` operations.
+- [x] Build environment listing UI (scrollable list with selection highlight).
+- [x] Build form fields (Host, Port, User, Pass, DB, etc.) for adding/editing environments.
+- [x] Connect form buttons to core `elm/core/environment.py` operations.
 **Covers:** ENV-01, ENV-02, ENV-03, ENV-04
 
 ## Phase 3: Execution Engine & Log Streaming
