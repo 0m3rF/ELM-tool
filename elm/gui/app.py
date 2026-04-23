@@ -59,12 +59,9 @@ class ELMApp(ctk.CTk):
         self.env_manager = EnvironmentManagerFrame(self.tabview.tab("🌐  Environments"))
         self.env_manager.pack(fill="both", expand=True)
 
-        ops_label = ctk.CTkLabel(
-            self.tabview.tab("⚙  Operations"),
-            text="Copy operations will appear here.",
-            font=("", 14),
-        )
-        ops_label.pack(expand=True)
+        from elm.gui.operations_panel import OperationsPanel
+        self.ops_panel = OperationsPanel(self.tabview.tab("⚙  Operations"))
+        self.ops_panel.pack(fill="both", expand=True)
 
     def _on_close(self):
         """Handle window close: destroy the window and exit the process."""
