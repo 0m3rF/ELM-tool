@@ -66,13 +66,25 @@ Shipped v1.0 with ~865 LOC of GUI code across 3 modules (`app.py`, `environment_
 | Inside-method imports | Place GUI imports inside `_build_tabs` methods to prevent circular imports at module level | ✓ Working well |
 
 ---
-*Last updated: 2026-04-24 after v1.0 milestone completion*
+*Last updated: 2026-05-04 — Milestone v1.1 started*
+
+## Current Milestone: v1.1 Copy History & Re-Run
+
+**Goal:** Add persistent copy operation history accessible from both CLI and GUI, enabling users to view, re-run, and edit previous copy operations.
+
+**Target features:**
+- CLI `copy list` command to display previous copy operations with parameters and outcomes
+- CLI `copy re-run [id]` command to execute a previous copy operation with original parameters
+- CLI `copy edit [id]` workflow to modify and re-execute a previous copy operation
+- GUI "Copy History" panel showing a scrollable list of previous copy operations
+- GUI re-run and edit actions for each listed copy operation
+- Persistent storage layer for copy operation metadata (parameters, timestamps, status)
 
 ## Current State
 
-**Version:** v1.0 shipped ✓
-**Status:** GUI MVP complete. All 11 v1 requirements satisfied.
-**Next focus:** v1.1 — testing, masking builder, progress bars
+**Version:** v1.0 shipped ✓ | v1.1 in progress
+**Status:** GUI MVP complete. All 11 v1 requirements satisfied. Now building copy history feature.
+**Next focus:** v1.1 — copy history list, re-run, edit from both CLI and GUI
 
 ## Evolution
 
