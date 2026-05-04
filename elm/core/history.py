@@ -35,6 +35,7 @@ class HistoryRecord:
     status: Literal["success", "failure"]
     record_count: Optional[int]
     error_message: Optional[str]
+    last_run_date: Optional[str] = None
 
 
 class HistoryRecorder:
@@ -133,3 +134,31 @@ class HistoryRecorder:
                     os.remove(bak)
         except Exception:
             pass
+
+    def read_records(self) -> List[HistoryRecord]:
+        """Read all history records."""
+        return self._read_records(self.config.get_history_file())
+
+    def get_record(self, record_id: int) -> Optional[HistoryRecord]:
+        """Get a single history record by ID."""
+        for record in self.read_records():
+            if record.id == record_id:
+                return record
+        return None
+
+    def update_record(self, record_id: int, **kwargs) -> bool:
+        """Update fields on an existing history record. Returns True on success."""
+        try:
+            history_file = self.config.get_history_file()
+            with file_lock(history_file):
+                records = self._read_records(history_file)
+                for record in records:
+                    if record.id == record_id:
+                        for key, value in kwargs.items():
+                            if hasattr(record, key):
+                                setattr(record, key, value)
+                        self._write_records(history_file, records)
+                        return True
+            return False
+        except Exception:
+            return False
