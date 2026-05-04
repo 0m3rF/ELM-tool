@@ -167,18 +167,29 @@ class OperationsPanel(ctk.CTkFrame):
 
         self._clear_log()
 
+        record = {
+            "operation_type": "db2db",
+            "source": source,
+            "target": target,
+            "query": query,
+            "table": table,
+            "mode": "APPEND",
+            "batch_size": None,
+            "parallel_workers": 1,
+        }
+
         self.log_queue = queue.Queue()
         self.cancel_event = threading.Event()
 
         self.worker_thread = threading.Thread(
             target=self._copy_worker,
-            args=(source, target, query, table, self.log_queue, self.cancel_event),
+            args=(record, self.log_queue, self.cancel_event),
             daemon=True,
         )
         self.worker_thread.start()
         self.after(100, self._poll_queue)
 
-    def _copy_worker(self, source_env, target_env, query, table, log_queue, cancel_event):
+    def _copy_worker(self, record, log_queue, cancel_event):
         """Run copy in background, redirecting stdout/stderr to the queue."""
         old_stdout = sys.stdout
         old_stderr = sys.stderr
@@ -186,12 +197,38 @@ class OperationsPanel(ctk.CTkFrame):
         sys.stderr = QueueStream(log_queue)
 
         try:
-            result = api.copy_db_to_db(
-                source_env=source_env,
-                target_env=target_env,
-                query=query,
-                table=table,
-            )
+            op_type = record.get("operation_type", "db2db")
+            if op_type == "db2db":
+                result = api.copy_db_to_db(
+                    source_env=record.get("source"),
+                    target_env=record.get("target"),
+                    query=record.get("query"),
+                    table=record.get("table"),
+                    mode=record.get("mode") or "APPEND",
+                    batch_size=record.get("batch_size"),
+                    parallel_workers=record.get("parallel_workers") or 1,
+                )
+            elif op_type == "db2file":
+                result = api.copy_db_to_file(
+                    source_env=record.get("source"),
+                    query=record.get("query"),
+                    file_path=record.get("target"),
+                    mode=record.get("mode") or "REPLACE",
+                    batch_size=record.get("batch_size"),
+                    parallel_workers=record.get("parallel_workers") or 1,
+                )
+            elif op_type == "file2db":
+                result = api.copy_file_to_db(
+                    file_path=record.get("source"),
+                    target_env=record.get("target"),
+                    table=record.get("table"),
+                    mode=record.get("mode") or "APPEND",
+                    batch_size=record.get("batch_size"),
+                    parallel_workers=record.get("parallel_workers") or 1,
+                )
+            else:
+                result = {"success": False, "message": f"Unknown operation type: {op_type}"}
+
             if result.get("success"):
                 log_queue.put("\n✓ Copy completed successfully.\n")
             else:
@@ -203,6 +240,41 @@ class OperationsPanel(ctk.CTkFrame):
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
+
+    def pre_fill_form(self, record):
+        """Populate the copy form from a history record (db2db best-effort)."""
+        if record.get("source"):
+            self.source_var.set(record["source"])
+        if record.get("target"):
+            self.target_var.set(record["target"])
+        if record.get("query"):
+            self.query_input.delete("1.0", "end")
+            self.query_input.insert("1.0", record["query"])
+        if record.get("table"):
+            self.table_entry.delete(0, "end")
+            self.table_entry.insert(0, record["table"])
+
+    def run_history_record(self, record):
+        """Execute a copy operation from a history record without form interaction.
+
+        The record dict must contain an operation_type key (db2db, db2file, file2db).
+        """
+        self.status_label.configure(text="Running...", text_color=None)
+        self.execute_btn.configure(state="disabled")
+        self.cancel_btn.configure(state="normal")
+
+        self._clear_log()
+
+        self.log_queue = queue.Queue()
+        self.cancel_event = threading.Event()
+
+        self.worker_thread = threading.Thread(
+            target=self._copy_worker,
+            args=(record, self.log_queue, self.cancel_event),
+            daemon=True,
+        )
+        self.worker_thread.start()
+        self.after(100, self._poll_queue)
 
     def _poll_queue(self):
         """Drain log queue into the textbox; reschedule while worker lives."""
