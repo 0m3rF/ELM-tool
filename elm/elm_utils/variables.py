@@ -12,6 +12,7 @@ try:
     VENV_DIR = _config_manager.get_venv_dir()
     ENVS_FILE = _config_manager.get_envs_file()
     MASK_FILE = _config_manager.get_mask_file()
+    HISTORY_FILE = _config_manager.get_history_file()
 
 except ImportError:
     # Fallback to original behavior if config manager is not available
@@ -21,3 +22,4 @@ except ImportError:
     VENV_DIR = os.path.join(ELM_TOOL_HOME, VENV_NAME)
     ENVS_FILE = os.path.join(ELM_TOOL_HOME, "environments.ini")
     MASK_FILE = os.path.join(ELM_TOOL_HOME, "masking.json")
+    HISTORY_FILE = os.path.join(ELM_TOOL_HOME, "history.json")

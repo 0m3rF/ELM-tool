@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Copy History & Re-Run
-status: defining_requirements
+status: planned
 last_updated: "2026-05-04"
 progress:
-  total_phases: 0
+  total_phases: 1
   completed_phases: 0
-  total_plans: 0
+  total_plans: 2
   completed_plans: 0
   percent: 0
 ---
@@ -24,9 +24,9 @@ See: .planning/PROJECT.md (updated 2026-05-04)
 ## Current Position
 
 Phase: 4 (Storage Layer & Recording)
-Plan: —
-Status: Roadmap approved — ready to build
-Last activity: 2026-05-04 — Milestone v1.1 roadmap approved
+Plan: 2 plans ready to execute
+Status: Planned — ready for execution
+Last activity: 2026-05-04 — Phase 4 planning completed (2 plans, 2 waves)
 
 ## Execution State
 
@@ -35,6 +35,7 @@ Last activity: 2026-05-04 — Milestone v1.1 roadmap approved
 | 1 | Foundation & GUI Bootstrap | Complete |
 | 2 | Environment Management Visuals | Complete |
 | 3 | Execution Engine & Log Streaming | Complete |
+| 4 | Storage Layer & Recording | Planned |
 
 ## Milestone Status
 

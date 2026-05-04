@@ -36,7 +36,7 @@
 | 1. Foundation & GUI Bootstrap | v1.0 | 1/1 | Complete | 2026-04-14 |
 | 2. Environment Management Visuals | v1.0 | 1/1 | Complete | 2026-04-23 |
 | 3. Execution Engine & Log Streaming | v1.0 | 1/1 | Complete | 2026-04-24 |
-| 4. Storage Layer & Recording | v1.1 | 0/1 | Pending | — |
+| 4. Storage Layer & Recording | v1.1 | 0/2 | Planned | — |
 | 5. CLI History Commands | v1.1 | 0/1 | Pending | — |
 | 6. GUI History Panel | v1.1 | 0/1 | Pending | — |
 
@@ -50,12 +50,18 @@
 
 **Requirements:** STOR-01, STOR-02, STOR-03, STOR-04, STOR-05
 
+**Plans:** 2 plans
+
 **Success criteria:**
 1. Running `elm copy db2db` (or any copy command) creates a JSON history record
 2. History JSON file is readable/writable and co-located with environment config
 3. Each record has a unique incrementing integer ID
 4. Records contain all operation parameters and timestamps
 5. File size stays bounded (FIFO at 100 entries)
+
+Plans:
+- [ ] 04-01-PLAN.md — Build HistoryRecorder core module and extend infrastructure
+- [ ] 04-02-PLAN.md — Wire recording into all three copy functions and add tests
 
 ### Phase 5: CLI History Commands
 

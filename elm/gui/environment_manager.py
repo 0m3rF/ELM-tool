@@ -140,8 +140,8 @@ class EnvironmentFormPanel(ctk.CTkFrame):
         )
         self.title_label.pack(anchor="w", padx=16, pady=(16, 8))
 
-        # Form container
-        self.form_container = ctk.CTkFrame(self, fg_color="transparent")
+        # Form container (scrollable so all fields remain accessible on small screens)
+        self.form_container = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.form_container.pack(fill="both", expand=True, padx=16, pady=8)
 
         # Build form fields

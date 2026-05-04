@@ -111,7 +111,8 @@ class OperationResult:
     data: Optional[Any] = None
     record_count: Optional[int] = None
     error_details: Optional[str] = None
-    
+    history_saved: Optional[bool] = None
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert result to dictionary format."""
         result = {
@@ -124,4 +125,6 @@ class OperationResult:
             result['record_count'] = self.record_count
         if self.error_details is not None:
             result['error_details'] = self.error_details
+        if self.history_saved is not None:
+            result['history_saved'] = self.history_saved
         return result

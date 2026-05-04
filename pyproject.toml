@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "Extract, Load and Mask Tool for Database Operations"
 authors = [{name = "Ömer Faruk Kırlı", email = "omerfarukkirli@gmail.com"}]
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.14"
 license = "GPL-3.0-or-later"
 keywords = [
     "database tool",
