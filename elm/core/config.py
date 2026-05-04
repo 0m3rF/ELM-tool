@@ -31,7 +31,8 @@ class ConfigManager:
             "ELM_TOOL_HOME": os.getenv("ELM_TOOL_HOME", default_home),
             "VENV_NAME": f"venv_{self.app_name}",
             "APP_NAME": self.app_name,
-            "venv_initialized": False
+            "venv_initialized": False,
+            "history.max_entries": 100
         }
     
     def _get_config_file_path(self) -> str:
@@ -112,6 +113,10 @@ class ConfigManager:
     def get_mask_file(self) -> str:
         """Get the masking file path."""
         return os.path.join(self.get_elm_tool_home(), "masking.json")
+
+    def get_history_file(self) -> str:
+        """Get the history file path."""
+        return os.path.join(self.get_elm_tool_home(), "history.json")
 
     def is_venv_initialized(self) -> bool:
         """Check if the virtual environment has been initialized."""

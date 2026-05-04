@@ -1,7 +1,7 @@
 # Tech Stack
 
 ## Core Language & Runtime
-- **Language**: Python (>=3.7)
+- **Language**: Python (>=3.14)
 - **Primary Tooling**: ELM is a CLI pipeline tool, relying on `click` for its UI.
 
 ## Key Frameworks & Libraries
