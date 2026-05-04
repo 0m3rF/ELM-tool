@@ -43,13 +43,14 @@ class ELMApp(ctk.CTk):
         self._build_tabs()
 
     def _build_tabs(self):
-        """Create the CTkTabview with Environments and Operations tabs."""
+        """Create the CTkTabview with Environments, Operations, and History tabs."""
         self.tabview = ctk.CTkTabview(self, anchor="nw")
         self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
 
         # Add tabs with Unicode icons
         self.tabview.add("🌐  Environments")
         self.tabview.add("⚙  Operations")
+        self.tabview.add("⏳  History")
 
         # Set default active tab
         self.tabview.set("🌐  Environments")
@@ -62,6 +63,21 @@ class ELMApp(ctk.CTk):
         from elm.gui.operations_panel import OperationsPanel
         self.ops_panel = OperationsPanel(self.tabview.tab("⚙  Operations"))
         self.ops_panel.pack(fill="both", expand=True)
+
+        from elm.gui.history_panel import HistoryPanel
+        self.history_panel = HistoryPanel(self.tabview.tab("⏳  History"), app_ref=self)
+        self.history_panel.pack(fill="both", expand=True)
+
+        # Bind tab switching to start/stop history polling
+        self.tabview.configure(command=self._on_tab_change)
+
+    def _on_tab_change(self):
+        """Start/stop history polling based on active tab."""
+        current = self.tabview.get()
+        if current == "⏳  History":
+            self.history_panel.start_polling()
+        else:
+            self.history_panel.stop_polling()
 
     def _on_close(self):
         """Handle window close: destroy the window and exit the process."""
