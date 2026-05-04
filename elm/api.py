@@ -10,6 +10,7 @@ with CLI commands and eliminate code duplication.
 
 import pandas as pd
 from typing import Dict, List, Union, Optional, Any
+from dataclasses import asdict
 
 # Import core modules for unified business logic
 from elm.core import environment as core_env
@@ -18,6 +19,7 @@ from elm.core import masking as core_mask
 from elm.core import generation as core_gen
 from elm.core import config as core_config
 from elm.core.types import OperationResult
+from elm.core.history import HistoryRecorder, HistoryRecord
 
 # Environment Management Functions
 
@@ -567,3 +569,30 @@ def get_config_info() -> Dict[str, Any]:
     """
     result = core_config.show_config_info()
     return result.data if result.success else {}
+
+
+# History Functions
+
+def list_history() -> List[Dict[str, Any]]:
+    """List all copy operation history records.
+
+    Returns:
+        List of history record dictionaries
+    """
+    recorder = HistoryRecorder()
+    records = recorder.read_records()
+    return [asdict(r) for r in records]
+
+
+def get_history_record(record_id: int) -> Optional[Dict[str, Any]]:
+    """Get a single history record by ID.
+
+    Args:
+        record_id: History record ID
+
+    Returns:
+        History record dictionary or None if not found
+    """
+    recorder = HistoryRecorder()
+    record = recorder.get_record(record_id)
+    return asdict(record) if record else None
