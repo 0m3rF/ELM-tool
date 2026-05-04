@@ -5,10 +5,10 @@ milestone_name: Copy History & Re-Run
 status: in-progress
 last_updated: "2026-05-04"
 progress:
-  total_phases: 1
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  total_phases: 2
+  completed_phases: 2
+  total_plans: 3
+  completed_plans: 3
   percent: 100
 ---
 
@@ -23,10 +23,10 @@ See: .planning/PROJECT.md (updated 2026-05-04)
 
 ## Current Position
 
-Phase: 4 (Storage Layer & Recording)
-Plan: 2 plans ready to execute
-Status: Planned — ready for execution
-Last activity: 2026-05-04 — Phase 4 planning completed (2 plans, 2 waves)
+Phase: 5 (CLI History Commands)
+Plan: 1 plan executed
+Status: Complete — all tasks finished, tests passing
+Last activity: 2026-05-04 — Phase 5 execution completed (3 tasks, 14 tests)
 
 ## Execution State
 
@@ -36,6 +36,7 @@ Last activity: 2026-05-04 — Phase 4 planning completed (2 plans, 2 waves)
 | 2 | Environment Management Visuals | Complete |
 | 3 | Execution Engine & Log Streaming | Complete |
 | 4 | Storage Layer & Recording | Complete |
+| 5 | CLI History Commands | Complete |
 
 ## Milestone Status
 

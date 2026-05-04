@@ -37,7 +37,7 @@
 | 2. Environment Management Visuals | v1.0 | 1/1 | Complete | 2026-04-23 |
 | 3. Execution Engine & Log Streaming | v1.0 | 1/1 | Complete | 2026-04-24 |
 | 4. Storage Layer & Recording | v1.1 | 2/2 | Complete | 2026-05-04 |
-| 5. CLI History Commands | v1.1 | 0/1 | Pending | — |
+| 5. CLI History Commands | v1.1 | 1/1 | Complete | 2026-05-04 |
 | 6. GUI History Panel | v1.1 | 0/1 | Pending | — |
 
 ---
