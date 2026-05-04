@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Copy History & Re-Run
-status: planned
+status: in-progress
 last_updated: "2026-05-04"
 progress:
   total_phases: 1
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 0
-  percent: 0
+  completed_plans: 2
+  percent: 100
 ---
 
 # Project State
@@ -35,7 +35,7 @@ Last activity: 2026-05-04 — Phase 4 planning completed (2 plans, 2 waves)
 | 1 | Foundation & GUI Bootstrap | Complete |
 | 2 | Environment Management Visuals | Complete |
 | 3 | Execution Engine & Log Streaming | Complete |
-| 4 | Storage Layer & Recording | Planned |
+| 4 | Storage Layer & Recording | Complete |
 
 ## Milestone Status
 
