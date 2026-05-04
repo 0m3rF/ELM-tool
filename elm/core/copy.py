@@ -17,6 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from elm.core.types import CopyConfig, WriteMode, FileFormat, OperationResult
 from elm.core.exceptions import CopyError, ValidationError, DatabaseError, FileError
+from elm.core.history import HistoryRecorder
 from elm.core.utils import (
     validate_write_mode, validate_file_format, ensure_directory_exists,
     create_success_result, create_error_result, handle_exception,
@@ -1192,6 +1193,7 @@ def copy_db_to_file(
     Returns:
         OperationResult with operation status and details
     """
+    _history_start_time = datetime.now().isoformat()
     try:
         validate_required_params(
             {'source_env': source_env, 'query': query, 'file_path': file_path},
@@ -1255,10 +1257,46 @@ def copy_db_to_file(
         if apply_masks:
             message += " (with masking applied)"
 
-        return create_success_result(message, record_count=total_records)
+        result = create_success_result(message, record_count=total_records)
+        _history_end_time = datetime.now().isoformat()
+        try:
+            recorder = HistoryRecorder()
+            _history_params = {
+                "operation_type": "db2file",
+                "source_env": source_env,
+                "target_env": file_path,
+                "query": query,
+                "mode": mode,
+                "batch_size": batch_size,
+                "parallel_workers": parallel_workers,
+                "start_time": _history_start_time,
+                "end_time": _history_end_time,
+            }
+            result.history_saved = recorder.record(result, _history_params)
+        except Exception:
+            result.history_saved = False
+        return result
 
     except Exception as e:
-        return handle_exception(e, "database to file copy")
+        result = handle_exception(e, "database to file copy")
+        _history_end_time = datetime.now().isoformat()
+        try:
+            recorder = HistoryRecorder()
+            _history_params = {
+                "operation_type": "db2file",
+                "source_env": source_env,
+                "target_env": file_path,
+                "query": query,
+                "mode": mode,
+                "batch_size": batch_size,
+                "parallel_workers": parallel_workers,
+                "start_time": _history_start_time,
+                "end_time": _history_end_time,
+            }
+            result.history_saved = recorder.record(result, _history_params)
+        except Exception:
+            result.history_saved = False
+        return result
 
 
 def copy_file_to_db(
@@ -1294,6 +1332,7 @@ def copy_file_to_db(
     Returns:
         OperationResult with operation status and details
     """
+    _history_start_time = datetime.now().isoformat()
     try:
         validate_required_params(
             {'file_path': file_path, 'target_env': target_env, 'table': table},
@@ -1336,10 +1375,46 @@ def copy_file_to_db(
         if apply_masks:
             message += " (with masking applied)"
 
-        return create_success_result(message, record_count=total_records)
+        result = create_success_result(message, record_count=total_records)
+        _history_end_time = datetime.now().isoformat()
+        try:
+            recorder = HistoryRecorder()
+            _history_params = {
+                "operation_type": "file2db",
+                "source_env": file_path,
+                "target_env": target_env,
+                "table": table,
+                "mode": mode,
+                "batch_size": batch_size,
+                "parallel_workers": parallel_workers,
+                "start_time": _history_start_time,
+                "end_time": _history_end_time,
+            }
+            result.history_saved = recorder.record(result, _history_params)
+        except Exception:
+            result.history_saved = False
+        return result
 
     except Exception as e:
-        return handle_exception(e, "file to database copy")
+        result = handle_exception(e, "file to database copy")
+        _history_end_time = datetime.now().isoformat()
+        try:
+            recorder = HistoryRecorder()
+            _history_params = {
+                "operation_type": "file2db",
+                "source_env": file_path,
+                "target_env": target_env,
+                "table": table,
+                "mode": mode,
+                "batch_size": batch_size,
+                "parallel_workers": parallel_workers,
+                "start_time": _history_start_time,
+                "end_time": _history_end_time,
+            }
+            result.history_saved = recorder.record(result, _history_params)
+        except Exception:
+            result.history_saved = False
+        return result
 
 
 def copy_db_to_db(
@@ -1378,6 +1453,7 @@ def copy_db_to_db(
     Returns:
         OperationResult with operation status and details
     """
+    _history_start_time = datetime.now().isoformat()
     try:
         validate_required_params(
             {'source_env': source_env, 'target_env': target_env, 'query': query, 'table': table},
@@ -1675,7 +1751,45 @@ def copy_db_to_db(
         if apply_masks:
             message += " (with masking applied)"
 
-        return create_success_result(message, record_count=total_records)
+        result = create_success_result(message, record_count=total_records)
+        _history_end_time = datetime.now().isoformat()
+        try:
+            recorder = HistoryRecorder()
+            _history_params = {
+                "operation_type": "db2db",
+                "source_env": source_env,
+                "target_env": target_env,
+                "query": query,
+                "table": table,
+                "mode": mode,
+                "batch_size": batch_size,
+                "parallel_workers": parallel_workers,
+                "start_time": _history_start_time,
+                "end_time": _history_end_time,
+            }
+            result.history_saved = recorder.record(result, _history_params)
+        except Exception:
+            result.history_saved = False
+        return result
 
     except Exception as e:
-        return handle_exception(e, "database to database copy")
+        result = handle_exception(e, "database to database copy")
+        _history_end_time = datetime.now().isoformat()
+        try:
+            recorder = HistoryRecorder()
+            _history_params = {
+                "operation_type": "db2db",
+                "source_env": source_env,
+                "target_env": target_env,
+                "query": query,
+                "table": table,
+                "mode": mode,
+                "batch_size": batch_size,
+                "parallel_workers": parallel_workers,
+                "start_time": _history_start_time,
+                "end_time": _history_end_time,
+            }
+            result.history_saved = recorder.record(result, _history_params)
+        except Exception:
+            result.history_saved = False
+        return result
