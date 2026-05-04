@@ -1,25 +1,32 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: complete
-last_updated: "2026-04-24"
+milestone: v1.1
+milestone_name: Copy History & Re-Run
+status: defining_requirements
+last_updated: "2026-05-04"
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 1
-  completed_plans: 1
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-24)
+See: .planning/PROJECT.md (updated 2026-05-04)
 
 **Core value:** A visual interface that makes ELM-tool's environment management and copying features accessible and intuitive, bridging the gap between command-line power and GUI ease-of-use.
-**Current focus:** Planning next milestone (v1.1)
+**Current focus:** Defining requirements for milestone v1.1 (Copy History & Re-Run)
+
+## Current Position
+
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-05-04 — Milestone v1.1 started
 
 ## Execution State
 
@@ -38,16 +45,13 @@ See: .planning/PROJECT.md (updated 2026-04-24)
 - Audit: `.planning/v1.0-MILESTONE-AUDIT.md`
 - Tag: `v1.0`
 
-## Next Milestone Goals (v1.1)
+**v1.1 — IN PROGRESS**
+- Goal: Add persistent copy operation history accessible from both CLI and GUI
+- Status: Defining requirements
 
-- Mock-based unit tests for GUI widgets and threading logic (headless CI support)
-- Visual masking rules builder
-- Progress bars for long-running copy operations
-- Export/import environment configurations
+## Accumulated Context
 
-## Deferred Items
-
-Items acknowledged and deferred at milestone close on 2026-04-24:
+Items acknowledged and deferred at milestone close on 2026-04-24 (carried forward):
 
 | Category | Item | Status |
 |----------|------|--------|
@@ -55,3 +59,6 @@ Items acknowledged and deferred at milestone close on 2026-04-24:
 | testing | Unit tests for OperationsPanel threading | pending |
 | docs | Standalone VERIFICATION.md for all 3 phases | pending |
 | docs | VALIDATION.md / Nyquist compliance for all phases | pending |
+| features | Visual masking rules builder | deferred to future milestone |
+| features | Progress bars for long-running copy operations | deferred to future milestone |
+| features | Export/import environment configurations | deferred to future milestone |
