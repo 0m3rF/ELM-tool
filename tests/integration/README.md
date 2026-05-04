@@ -55,6 +55,105 @@ Each database uses a different table schema to test schema compatibility:
 - **MSSQL**: `test_orders_mssql` - Order data with NVARCHAR and DECIMAL
 - **Oracle**: `test_inventory_ora` - Inventory data with NUMBER and VARCHAR2
 
+## GUI (New in v1.0)
+
+Starting with v1.0, ELM-tool includes a native **CustomTkinter GUI** that launches automatically when the CLI is invoked without arguments.
+
+### Launching the GUI
+
+```bash
+# No arguments — opens the GUI window
+elm-tool
+
+# Or via Python module
+python -m elm.elm
+```
+
+With CLI arguments, the headless mode is used instead:
+```bash
+elm-tool env list        # headless CLI
+elm-tool copy --help     # headless CLI
+```
+
+### GUI Features
+
+1. **🌐 Environments Tab**
+   - Scrollable list of all configured database environments
+   - "＋ New" button to create environments
+   - Full form for editing environment details (host, port, user, password, service, DB type)
+   - Write-only password field (never displayed from stored data)
+   - Connection type dropdown for Oracle (service_name / sid)
+   - Encrypt credentials checkbox with optional encryption key
+   - **Test Connection** button to verify connectivity
+   - **Delete** button with confirmation dialog
+
+2. **⚙ Operations Tab**
+   - **Source Environment** dropdown — select the database to copy from
+   - **Target Environment** dropdown — select the database to copy to
+   - **SQL Query** multiline input — define what data to extract
+   - **Target Table** entry — specify destination table name
+   - **▶ Execute** button — runs the copy in a background thread
+   - **⏹ Cancel** button — requests cooperative cancellation
+   - **Execution Log** panel — streams stdout/stderr in real time from the copy worker
+
+### GUI Testing
+
+#### Prerequisites
+- Python with `tkinter` support (typically bundled with standard Python on Windows/macOS; `python3-tk` package on Linux)
+- `customtkinter>=5.2.0` installed (included in project dependencies)
+
+#### Manual Verification Steps
+
+After installing the project:
+
+```bash
+pip install -e ".[all-db]"
+```
+
+1. **Launch test:**
+   ```bash
+   python -m elm.elm
+   ```
+   Expected: CustomTkinter window opens (800×600, centered), "🌐 Environments" tab active.
+
+2. **Create an environment:**
+   - Click "＋ New"
+   - Fill: Name=`test_pg`, Host=`localhost`, Port=`5433`, User=`testuser`, Password=`testpass`, Service=`testdb`, DB Type=`POSTGRES`
+   - Click **Save Environment**
+   - Expected: Environment appears in the left list
+
+3. **Test connection:**
+   - Select the environment from the list
+   - Click **Test Connection**
+   - Expected: Status shows "Connected successfully" (green)
+
+4. **Run a copy operation:**
+   - Switch to "⚙ Operations" tab
+   - Select Source and Target (need at least 2 environments)
+   - Enter SQL query: `SELECT * FROM test_users_pg`
+   - Enter Target Table: `test_users_copy`
+   - Click **▶ Execute**
+   - Expected: Status shows "Running...", log panel streams batch output, then "✓ Copy completed successfully."
+
+5. **Close window:**
+   - Click the window close button (X)
+   - Expected: Window closes, process exits cleanly (no hanging terminal)
+
+#### Automated GUI Tests (Headless CI)
+
+GUI widget tests can be run headlessly by mocking `customtkinter` and `tkinter` components. See the test directory for mock-based tests that verify threading logic and API integration without requiring a display.
+
+```bash
+# Run core tests (non-GUI)
+pytest tests/core/ tests/api/ tests/cli/ -x -q
+
+# GUI module syntax check
+python -c "import ast; ast.parse(open('elm/gui/app.py', encoding='utf-8').read()); print('OK')"
+python -c "import ast; ast.parse(open('elm/gui/operations_panel.py', encoding='utf-8').read()); print('OK')"
+```
+
+---
+
 ## Prerequisites
 
 ### 1. Database Containers
