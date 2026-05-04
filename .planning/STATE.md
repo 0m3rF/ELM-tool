@@ -23,10 +23,10 @@ See: .planning/PROJECT.md (updated 2026-05-04)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 4 (Storage Layer & Recording)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-05-04 — Milestone v1.1 started
+Status: Roadmap approved — ready to build
+Last activity: 2026-05-04 — Milestone v1.1 roadmap approved
 
 ## Execution State
 
