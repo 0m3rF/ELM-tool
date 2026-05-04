@@ -36,7 +36,7 @@
 | 1. Foundation & GUI Bootstrap | v1.0 | 1/1 | Complete | 2026-04-14 |
 | 2. Environment Management Visuals | v1.0 | 1/1 | Complete | 2026-04-23 |
 | 3. Execution Engine & Log Streaming | v1.0 | 1/1 | Complete | 2026-04-24 |
-| 4. Storage Layer & Recording | v1.1 | 0/2 | Planned | — |
+| 4. Storage Layer & Recording | v1.1 | 2/2 | Complete | 2026-05-04 |
 | 5. CLI History Commands | v1.1 | 0/1 | Pending | — |
 | 6. GUI History Panel | v1.1 | 0/1 | Pending | — |
 
@@ -60,8 +60,8 @@
 5. File size stays bounded (FIFO at 100 entries)
 
 Plans:
-- [ ] 04-01-PLAN.md — Build HistoryRecorder core module and extend infrastructure
-- [ ] 04-02-PLAN.md — Wire recording into all three copy functions and add tests
+- [x] 04-01-PLAN.md — Build HistoryRecorder core module and extend infrastructure
+- [x] 04-02-PLAN.md — Wire recording into all three copy functions and add tests
 
 ### Phase 5: CLI History Commands
 
