@@ -11,10 +11,13 @@ from elm import api
 class HistoryPanel(ctk.CTkFrame):
     """Panel displaying copy operation history with re-run and edit actions."""
 
+    REFRESH_LABEL = "Last refreshed: "
+
     def __init__(self, master, app_ref):
         super().__init__(master, fg_color="transparent")
         self.app = app_ref
         self._poll_after_id = None
+        self._last_records_hash = None
 
         # Status label
         self.status_label = ctk.CTkLabel(self, text="Last refreshed: never", font=("", 12))
@@ -31,17 +34,28 @@ class HistoryPanel(ctk.CTkFrame):
 
         self._refresh_list()
 
-    def _refresh_list(self):
-        """Fetch history records and rebuild the scrollable list."""
+    def _refresh_list(self, force=False):
+        """Fetch history records and rebuild the scrollable list only if changed."""
+        records = api.list_history()
+
+        # Compute a simple hash of the records to detect changes
+        import json
+        records_hash = json.dumps(records, sort_keys=True) if records else ""
+
+        if not force and records_hash == self._last_records_hash:
+            # No change — just update timestamp without destroying widgets
+            self.status_label.configure(text=self.REFRESH_LABEL + self._now())
+            return
+
+        self._last_records_hash = records_hash
+
         for widget in self.list_container.winfo_children():
             widget.destroy()
-
-        records = api.list_history()
 
         if not records:
             self.list_container.pack_forget()
             self.empty_label.pack(expand=True)
-            self.status_label.configure(text="Last refreshed: " + self._now())
+            self.status_label.configure(text=self.REFRESH_LABEL + self._now())
             return
 
         self.empty_label.pack_forget()
@@ -50,7 +64,7 @@ class HistoryPanel(ctk.CTkFrame):
         for record in records:
             self._build_row(record)
 
-        self.status_label.configure(text="Last refreshed: " + self._now())
+        self.status_label.configure(text=self.REFRESH_LABEL + self._now())
 
     def _build_row(self, record):
         """Create a single history entry row inside the scrollable frame."""
@@ -114,9 +128,9 @@ class HistoryPanel(ctk.CTkFrame):
         return datetime.now().strftime("%H:%M:%S")
 
     def start_polling(self):
-        """Begin 15-second refresh poll."""
+        """Begin 5-second refresh poll."""
         self._refresh_list()
-        self._poll_after_id = self.after(15000, self._poll_refresh)
+        self._poll_after_id = self.after(5000, self._poll_refresh)
 
     def stop_polling(self):
         """Cancel pending poll."""
@@ -127,4 +141,4 @@ class HistoryPanel(ctk.CTkFrame):
     def _poll_refresh(self):
         """Refresh and reschedule."""
         self._refresh_list()
-        self._poll_after_id = self.after(15000, self._poll_refresh)
+        self._poll_after_id = self.after(5000, self._poll_refresh)

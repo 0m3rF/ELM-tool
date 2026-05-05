@@ -303,16 +303,19 @@ class EnvironmentFormPanel(ctk.CTkFrame):
 
     def _populate_fields(self, env_data):
         """Fill form from environment data. Password remains empty (write-only)."""
-        if not env_data:
+        if not env_data or not isinstance(env_data, dict):
             return
 
-        self.fields["name"].insert(0, env_data.get("name", ""))
-        self.fields["host"].insert(0, env_data.get("host", ""))
-        port_val = env_data.get("port", "")
-        self.fields["port"].insert(0, str(port_val) if port_val is not None else "")
-        self.fields["user"].insert(0, env_data.get("user", ""))
+        def _safe_insert(entry, value):
+            """Coerce value to string before inserting into CTkEntry."""
+            entry.insert(0, str(value) if value is not None else "")
+
+        _safe_insert(self.fields["name"], env_data.get("name", ""))
+        _safe_insert(self.fields["host"], env_data.get("host", ""))
+        _safe_insert(self.fields["port"], env_data.get("port", ""))
+        _safe_insert(self.fields["user"], env_data.get("user", ""))
         # Password is intentionally left empty — write-only per D-02
-        self.fields["service"].insert(0, env_data.get("service", ""))
+        _safe_insert(self.fields["service"], env_data.get("service", ""))
 
         db_type = env_data.get("type", "ORACLE")
         self.db_type_menu.set(db_type)
@@ -321,7 +324,8 @@ class EnvironmentFormPanel(ctk.CTkFrame):
         if db_type == "ORACLE":
             self.conn_type_menu.set(env_data.get("connection_type", "service_name"))
 
-        is_encrypted = env_data.get("is_encrypted", "False") == "True"
+        is_encrypted_raw = env_data.get("is_encrypted", False)
+        is_encrypted = str(is_encrypted_raw).lower() in ("true", "1", "yes")
         if is_encrypted:
             self.encrypt_check.select()
         else:

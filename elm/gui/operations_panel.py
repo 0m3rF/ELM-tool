@@ -39,6 +39,7 @@ class OperationsPanel(ctk.CTkFrame):
         self.worker_thread = None
         self.log_queue = queue.Queue()
         self.cancel_event = threading.Event()
+        self.on_copy_complete_callback = None
 
         # ---- Top: Copy Form ----
         self.form_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -243,10 +244,33 @@ class OperationsPanel(ctk.CTkFrame):
 
     def pre_fill_form(self, record):
         """Populate the copy form from a history record (db2db best-effort)."""
-        if record.get("source"):
-            self.source_var.set(record["source"])
-        if record.get("target"):
-            self.target_var.set(record["target"])
+        self._refresh_environments()
+
+        envs = api.list_environments(show_all=True)
+        env_names = {e["name"] for e in envs if "name" in e}
+
+        missing = []
+        src = record.get("source")
+        tgt = record.get("target")
+
+        if src and src in env_names:
+            self.source_var.set(src)
+        elif src:
+            missing.append(f"source '{src}'")
+            self.source_var.set(src)
+
+        if tgt and tgt in env_names:
+            self.target_var.set(tgt)
+        elif tgt:
+            missing.append(f"target '{tgt}'")
+            self.target_var.set(tgt)
+
+        if missing:
+            self.status_label.configure(
+                text="Warning: missing environments " + ", ".join(missing),
+                text_color="#DC3545",
+            )
+
         if record.get("query"):
             self.query_input.delete("1.0", "end")
             self.query_input.insert("1.0", record["query"])
@@ -254,11 +278,36 @@ class OperationsPanel(ctk.CTkFrame):
             self.table_entry.delete(0, "end")
             self.table_entry.insert(0, record["table"])
 
+    def _validate_record_envs(self, record):
+        """Check that source/target environments in a record still exist."""
+        op_type = record.get("operation_type", "db2db")
+        envs = api.list_environments(show_all=True)
+        env_names = {e["name"] for e in envs if "name" in e}
+
+        missing = []
+        if op_type in ("db2db", "db2file"):
+            src = record.get("source")
+            if src and src not in env_names:
+                missing.append(f"source '{src}'")
+        if op_type in ("db2db", "file2db"):
+            tgt = record.get("target")
+            if tgt and tgt not in env_names:
+                missing.append(f"target '{tgt}'")
+        return missing
+
     def run_history_record(self, record):
         """Execute a copy operation from a history record without form interaction.
 
         The record dict must contain an operation_type key (db2db, db2file, file2db).
         """
+        missing_envs = self._validate_record_envs(record)
+        if missing_envs:
+            self.status_label.configure(
+                text="Missing environments: " + ", ".join(missing_envs),
+                text_color="#DC3545",
+            )
+            return
+
         self.status_label.configure(text="Running...", text_color=None)
         self.execute_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
@@ -294,11 +343,16 @@ class OperationsPanel(ctk.CTkFrame):
             self._on_copy_finished()
 
     def _on_copy_finished(self):
-        """Reset UI after worker terminates."""
+        """Reset UI after worker terminates and notify listeners."""
         self.execute_btn.configure(state="normal")
         self.cancel_btn.configure(state="disabled")
         self.status_label.configure(text="Ready")
         self._drain_remaining_queue()
+        if self.on_copy_complete_callback:
+            try:
+                self.on_copy_complete_callback(force=True)
+            except Exception:
+                pass
 
     def _drain_remaining_queue(self):
         """Flush any leftover queue items (no rescheduling)."""
