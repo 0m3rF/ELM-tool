@@ -202,6 +202,7 @@ class TestOperationsPanelIntegration:
         mock_panel._clear_log = MagicMock()
         mock_panel.after = MagicMock()
         mock_panel._copy_worker = MagicMock()
+        mock_panel._validate_record_envs = MagicMock(return_value=[])
         mock_panel.log_queue = None
         mock_panel.cancel_event = None
         mock_panel.worker_thread = None
@@ -216,6 +217,7 @@ class TestOperationsPanelIntegration:
 
         OperationsPanel.run_history_record(mock_panel, record)
 
+        mock_panel._validate_record_envs.assert_called_once_with(record)
         mock_panel.execute_btn.configure.assert_called_once_with(state="disabled")
         mock_panel.cancel_btn.configure.assert_called_once_with(state="normal")
         mock_panel._clear_log.assert_called_once()

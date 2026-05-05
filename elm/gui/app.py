@@ -68,6 +68,9 @@ class ELMApp(ctk.CTk):
         self.history_panel = HistoryPanel(self.tabview.tab("⏳  History"), app_ref=self)
         self.history_panel.pack(fill="both", expand=True)
 
+        # Wire copy-completion callback so History panel refreshes immediately
+        self.ops_panel.on_copy_complete_callback = self.history_panel._refresh_list
+
         # Bind tab switching to start/stop history polling
         self.tabview.configure(command=self._on_tab_change)
 
