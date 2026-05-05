@@ -1,5 +1,5 @@
 ---
-status: diagnosed
+status: resolved
 phase: 06-gui-history-panel
 source: 06-01-SUMMARY.md
 started: 2026-05-05T00:00:00Z
@@ -61,7 +61,7 @@ blocked: 0
 ## Gaps
 
 - truth: "History list displays with scrollable rows, color-coded status badges, and all metadata fields"
-  status: failed
+  status: resolved
   reason: "User reported: yes but refreshing the UI blinks for a moment. ensure to do that at the background and update if there are any diffs"
   severity: minor
   test: 2
@@ -73,7 +73,7 @@ blocked: 0
     - "Store last-seen record hashes, compare before destroy, only update changed/added/removed rows"
   debug_session: ""
 - truth: "Clicking Re-run on history entry switches to Operations tab and executes copy with original parameters"
-  status: failed
+  status: resolved
   reason: "User reported: no, I can add new environment but can't edit it when I click on environments list"
   severity: major
   test: 5
@@ -88,7 +88,7 @@ blocked: 0
     - "Ensure EnvironmentFormPanel._populate_fields handles all api.get_environment response shapes"
   debug_session: ""
 - truth: "Clicking Edit button on history entry switches to Operations tab and pre-fills form"
-  status: failed
+  status: resolved
   reason: "User reported: I can see but can't execute them."
   severity: major
   test: 6
@@ -101,7 +101,7 @@ blocked: 0
     - "Validate that pre-filled environment names exist in current dropdown list"
   debug_session: ""
 - truth: "After a copy operation completes, switching to History tab shows the new operation automatically"
-  status: failed
+  status: resolved
   reason: "User reported: no"
   severity: major
   test: 7
