@@ -1,18 +1,14 @@
 ---
-status: testing
+status: complete
 phase: 06-gui-history-panel
 source: 06-01-SUMMARY.md
 started: 2026-05-05T00:00:00Z
-updated: 2026-05-05T00:00:08Z
+updated: 2026-05-05T00:00:09Z
 ---
 
 ## Current Test
 
-number: 7
-name: Auto-refresh After New Operation
-expected: |
-  After a copy operation completes from the Operations tab, switching to the History tab (or waiting ~5 seconds while on it) shows the new operation in the list automatically.
-awaiting: user response
+[testing complete]
 
 ## Tests
 
@@ -44,14 +40,14 @@ result: pass
 
 ### 7. Auto-refresh After New Operation
 expected: After a copy operation completes from the Operations tab, switching to the History tab (or waiting ~5 seconds while on it) shows the new operation in the list automatically.
-result: pending
+result: pass
 
 ## Summary
 
 total: 7
-passed: 5
+passed: 6
 issues: 0
-pending: 1
+pending: 0
 skipped: 0
 blocked: 0
 
