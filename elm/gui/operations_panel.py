@@ -162,7 +162,7 @@ class OperationsPanel(ctk.CTkFrame):
             )
             return
 
-        self.status_label.configure(text="Running...", text_color=None)
+        self.status_label.configure(text="Running...")
         self.execute_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
 
@@ -308,7 +308,7 @@ class OperationsPanel(ctk.CTkFrame):
             )
             return
 
-        self.status_label.configure(text="Running...", text_color=None)
+        self.status_label.configure(text="Running...")
         self.execute_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
 
