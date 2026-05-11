@@ -5,6 +5,7 @@
 ## Milestones
 
 - ✅ **v1.0 MVP** — Phases 1-3 (shipped 2026-04-24)
+- ✅ **v1.1 Copy History & Re-Run** — Phases 4-6 (shipped 2026-05-06)
 
 ## Phases
 
@@ -29,6 +30,24 @@
 
 </details>
 
+<details>
+<summary>✅ v1.1 Copy History & Re-Run (Phases 4-6) — SHIPPED 2026-05-06</summary>
+
+- [x] Phase 4: Storage Layer & Recording (2/2 plans) — completed 2026-05-04
+  - `HistoryRecorder` core module with thread-safe JSON storage and FIFO eviction
+  - Wired recording into all three copy functions (`db2db`, `db2file`, `file2db`)
+  - **Covers:** STOR-01, STOR-02, STOR-03, STOR-04, STOR-05
+- [x] Phase 5: CLI History Commands (1/1 plans) — completed 2026-05-04
+  - `elm copy list` with tabular/JSON output and filtering
+  - `elm copy re-run <id>` and `elm copy edit <id>` with override flags
+  - **Covers:** CLIC-01, CLIC-02, CLIC-03, CLIC-04
+- [x] Phase 6: GUI History Panel (1/1 plans) — completed 2026-05-04
+  - ⏳ History tab with scrollable operations list and color-coded status badges
+  - Re-run and Edit & Re-run actions with auto-refresh on copy completion
+  - **Covers:** GUIR-01, GUIR-02, GUIR-03, GUIR-04, GUIR-05
+
+</details>
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -39,51 +58,3 @@
 | 4. Storage Layer & Recording | v1.1 | 2/2 | Complete | 2026-05-04 |
 | 5. CLI History Commands | v1.1 | 1/1 | Complete | 2026-05-04 |
 | 6. GUI History Panel | v1.1 | 1/1 | Complete | 2026-05-04 |
-
----
-
-## Upcoming: v1.1 Copy History & Re-Run
-
-### Phase 4: Storage Layer & Recording
-
-**Goal:** Implement persistent storage that records every copy operation with full metadata.
-
-**Requirements:** STOR-01, STOR-02, STOR-03, STOR-04, STOR-05
-
-**Plans:** 2 plans
-
-**Success criteria:**
-1. Running `elm copy db2db` (or any copy command) creates a JSON history record
-2. History JSON file is readable/writable and co-located with environment config
-3. Each record has a unique incrementing integer ID
-4. Records contain all operation parameters and timestamps
-5. File size stays bounded (FIFO at 100 entries)
-
-Plans:
-- [x] 04-01-PLAN.md — Build HistoryRecorder core module and extend infrastructure
-- [x] 04-02-PLAN.md — Wire recording into all three copy functions and add tests
-
-### Phase 5: CLI History Commands
-
-**Goal:** Add `copy list`, `copy re-run`, and `copy edit` CLI commands.
-
-**Requirements:** CLIC-01, CLIC-02, CLIC-03, CLIC-04
-
-**Success criteria:**
-1. `elm copy list` displays a formatted table of past operations
-2. `elm copy re-run <id>` executes the operation with original parameters
-3. `elm copy edit <id> --target new_env` overrides specific fields and runs
-4. Filtering flags (`--status`, `--source`, `--limit`) work as expected
-
-### Phase 6: GUI History Panel
-
-**Goal:** Add a "History" tab to the GUI with scrollable operations list and re-run/edit actions.
-
-**Requirements:** GUIR-01, GUIR-02, GUIR-03, GUIR-04, GUIR-05
-
-**Success criteria:**
-1. New "History" tab appears in the GUI tab bar
-2. List shows all past operations with color-coded status
-3. Clicking "Re-run" on an entry executes the operation in background with log streaming
-4. Clicking "Edit & Re-run" switches to Operations tab with form pre-filled
-5. New operations automatically appear in the History list after completion
