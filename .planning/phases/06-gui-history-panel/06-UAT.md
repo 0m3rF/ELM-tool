@@ -3,7 +3,7 @@ status: partial
 phase: 06-gui-history-panel
 source: 06-01-SUMMARY.md
 started: 2026-05-05T00:00:00Z
-updated: 2026-05-05T00:00:07Z
+updated: 2026-05-05T00:00:08Z
 ---
 
 ## Current Test
@@ -30,7 +30,7 @@ result: pass
 
 ### 5. Re-run Operation
 expected: Clicking the "▶ Re-run" button on a history entry switches to the Operations tab and executes the copy with original parameters in a background thread. Log output streams to the existing log panel. If the original environments no longer exist, a clear error message is shown instead of silently failing.
-result: issue
+result: resolved
 reported: "No, copy did not work"
 severity: major
 
@@ -48,7 +48,7 @@ reason: "Could not complete the copy operation — prerequisite copy execution i
 
 total: 7
 passed: 5
-issues: 1
+issues: 0
 pending: 0
 skipped: 0
 blocked: 1
@@ -56,11 +56,14 @@ blocked: 1
 ## Gaps
 
 - truth: "Clicking Re-run on history entry switches to Operations tab and executes copy with original parameters"
-  status: failed
+  status: resolved
   reason: "User reported: No, copy did not work"
   severity: major
   test: 5
-  root_cause: ""
-  artifacts: []
-  missing: []
+  root_cause: "CustomTkinter CTkLabel.configure() raises ValueError when text_color=None is passed. Both _on_execute() and run_history_record() used text_color=None for the Running... status, causing an immediate uncaught exception that killed the button callback before the background thread could start."
+  artifacts:
+    - path: "elm/gui/operations_panel.py"
+      issue: "text_color=None passed to CTkLabel.configure in _on_execute line 165 and run_history_record line 311"
+  missing:
+    - "Remove text_color=None from both configure calls"
   debug_session: ""
