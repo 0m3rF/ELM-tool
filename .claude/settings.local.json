@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Projeler\\\\ELM-tool\" -Force)",
+      "Bash(Select-Object -Property Mode, Name)"
+    ]
+  }
+}
