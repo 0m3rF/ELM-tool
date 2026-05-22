@@ -13,8 +13,8 @@ class ELMApp(ctk.CTk):
     """Main ELM Tool GUI application window."""
 
     WINDOW_TITLE = "ELM Tool"
-    WINDOW_WIDTH = 800
-    WINDOW_HEIGHT = 600
+    WINDOW_WIDTH = 1100
+    WINDOW_HEIGHT = 720
 
     def __init__(self):
         super().__init__()

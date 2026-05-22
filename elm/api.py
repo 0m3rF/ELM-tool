@@ -596,3 +596,26 @@ def get_history_record(record_id: int) -> Optional[Dict[str, Any]]:
     recorder = HistoryRecorder()
     record = recorder.get_record(record_id)
     return asdict(record) if record else None
+
+
+def delete_history_record(record_id: int) -> bool:
+    """Delete a single history record by ID.
+
+    Args:
+        record_id: History record ID
+
+    Returns:
+        True if the record was found and deleted, False otherwise
+    """
+    recorder = HistoryRecorder()
+    return recorder.delete_record(record_id)
+
+
+def clear_history() -> bool:
+    """Delete all history records.
+
+    Returns:
+        True on success
+    """
+    recorder = HistoryRecorder()
+    return recorder.clear_history()

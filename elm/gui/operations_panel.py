@@ -77,6 +77,16 @@ class OperationsPanel(ctk.CTkFrame):
         )
         self.table_entry.pack(fill="x", pady=(0, 8))
 
+        # Write Mode
+        ctk.CTkLabel(self.form_frame, text="Write Mode", font=("", 12)).pack(anchor="w")
+        self.mode_var = ctk.StringVar(value="APPEND")
+        self.mode_menu = ctk.CTkOptionMenu(
+            self.form_frame,
+            variable=self.mode_var,
+            values=["APPEND", "OVERWRITE", "FAIL"],
+        )
+        self.mode_menu.pack(fill="x", pady=(0, 8))
+
         # Button row
         self.btn_frame = ctk.CTkFrame(self.form_frame, fg_color="transparent")
         self.btn_frame.pack(fill="x")
@@ -108,20 +118,23 @@ class OperationsPanel(ctk.CTkFrame):
         self.log_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.log_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
+        log_header = ctk.CTkFrame(self.log_frame, fg_color="transparent")
+        log_header.pack(fill="x", pady=(0, 8))
+
         ctk.CTkLabel(
-            self.log_frame, text="Execution Log", font=("", 18, "bold")
-        ).pack(anchor="w", pady=(0, 8))
+            log_header, text="Execution Log", font=("", 18, "bold")
+        ).pack(side="left")
+
+        self.clear_btn = ctk.CTkButton(
+            log_header,
+            text="Clear Log",
+            width=90,
+            command=self._clear_log,
+        )
+        self.clear_btn.pack(side="right")
 
         self.log_textbox = ctk.CTkTextbox(self.log_frame, state="disabled")
         self.log_textbox.pack(fill="both", expand=True)
-
-        self.clear_btn = ctk.CTkButton(
-            self.log_frame,
-            text="Clear Log",
-            width=80,
-            command=self._clear_log,
-        )
-        self.clear_btn.pack(anchor="e", pady=(8, 0))
 
         self._refresh_environments()
 
@@ -174,7 +187,7 @@ class OperationsPanel(ctk.CTkFrame):
             "target": target,
             "query": query,
             "table": table,
-            "mode": "APPEND",
+            "mode": self.mode_var.get(),
             "batch_size": None,
             "parallel_workers": 1,
         }
@@ -277,6 +290,8 @@ class OperationsPanel(ctk.CTkFrame):
         if record.get("table"):
             self.table_entry.delete(0, "end")
             self.table_entry.insert(0, record["table"])
+        if record.get("mode") in ("APPEND", "OVERWRITE", "FAIL"):
+            self.mode_var.set(record["mode"])
 
     def _validate_record_envs(self, record):
         """Check that source/target environments in a record still exist."""

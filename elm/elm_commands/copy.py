@@ -455,6 +455,44 @@ def edit_history(id, source, target, query, table, format, mode, batch_size, par
         raise click.UsageError(result.message)
 
 
+@copy.command(name="delete")
+@click.argument("id", type=int, required=False)
+@click.option("--all", "delete_all", is_flag=True, help="Delete all history records")
+@click.option("-y", "--yes", is_flag=True, help="Skip confirmation prompt")
+def delete_history(id, delete_all, yes):
+    """Delete a history record by ID, or all records with --all"""
+    recorder = HistoryRecorder()
+
+    if delete_all:
+        if not yes:
+            click.confirm("Delete ALL history records? This cannot be undone.", abort=True)
+        ok = recorder.clear_history()
+        if ok:
+            click.echo("All history records deleted.")
+        else:
+            click.echo("Error: Failed to clear history.", err=True)
+            raise click.ClickException("Failed to clear history")
+        return
+
+    if id is None:
+        raise click.UsageError("Provide a record ID or use --all to delete everything.")
+
+    record = recorder.get_record(id)
+    if record is None:
+        click.echo(f"Error: History record {id} not found.", err=True)
+        raise click.ClickException("Record not found")
+
+    if not yes:
+        click.confirm(f"Delete history record {id}?", abort=True)
+
+    ok = recorder.delete_record(id)
+    if ok:
+        click.echo(f"History record {id} deleted.")
+    else:
+        click.echo(f"Error: Failed to delete record {id}.", err=True)
+        raise click.ClickException("Delete failed")
+
+
 # Define aliases for commands
 ALIASES = {
     'database2file': db2file,
@@ -466,4 +504,6 @@ ALIASES = {
     'history': list_history,
     'ls': list_history,
     'rerun': re_run,
+    'rm': delete_history,
+    'del': delete_history,
 }
