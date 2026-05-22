@@ -19,9 +19,19 @@ class HistoryPanel(ctk.CTkFrame):
         self._poll_after_id = None
         self._last_records_hash = None
 
-        # Status label
-        self.status_label = ctk.CTkLabel(self, text="Last refreshed: never", font=("", 12))
-        self.status_label.pack(anchor="w", pady=(0, 8))
+        # Header row: status label + delete-all button
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.pack(fill="x", pady=(0, 8))
+
+        self.status_label = ctk.CTkLabel(header, text="Last refreshed: never", font=("", 12))
+        self.status_label.pack(side="left")
+
+        self.delete_all_btn = ctk.CTkButton(
+            header, text="✕ Delete All", width=110,
+            fg_color="#DC3545", hover_color="#a71d2a",
+            command=self._on_delete_all,
+        )
+        self.delete_all_btn.pack(side="right")
 
         # Empty state
         self.empty_label = ctk.CTkLabel(
@@ -36,7 +46,7 @@ class HistoryPanel(ctk.CTkFrame):
 
     def _refresh_list(self, force=False):
         """Fetch history records and rebuild the scrollable list only if changed."""
-        records = api.list_history()
+        records = list(reversed(api.list_history()))
 
         # Compute a simple hash of the records to detect changes
         import json
@@ -55,11 +65,13 @@ class HistoryPanel(ctk.CTkFrame):
         if not records:
             self.list_container.pack_forget()
             self.empty_label.pack(expand=True)
+            self.delete_all_btn.pack_forget()
             self.status_label.configure(text=self.REFRESH_LABEL + self._now())
             return
 
         self.empty_label.pack_forget()
         self.list_container.pack(fill="both", expand=True)
+        self.delete_all_btn.pack(side="right")
 
         for record in records:
             self._build_row(record)
@@ -87,7 +99,7 @@ class HistoryPanel(ctk.CTkFrame):
         ctk.CTkLabel(row, text=id_text, font=("", 12), width=40).pack(side="left")
         ctk.CTkLabel(row, text=date_text, font=("", 12), width=120).pack(side="left")
         ctk.CTkLabel(row, text=type_text, font=("", 12), width=80).pack(side="left")
-        ctk.CTkLabel(row, text=route, font=("", 12), wraplength=200).pack(side="left", fill="x", expand=True)
+        ctk.CTkLabel(row, text=route, font=("", 12), anchor="w").pack(side="left", fill="x", expand=True)
         ctk.CTkLabel(row, text=table_text, font=("", 12), width=100).pack(side="left")
         ctk.CTkLabel(row, text=status, font=("", 12), text_color=color, width=80).pack(side="left")
 
@@ -102,6 +114,12 @@ class HistoryPanel(ctk.CTkFrame):
             command=lambda rid=record["id"]: self._on_edit(rid)
         )
         edit_btn.pack(side="right", padx=(4, 0))
+
+        delete_btn = ctk.CTkButton(
+            row, text="✕ Delete", width=90, fg_color="#DC3545", hover_color="#a71d2a",
+            command=lambda rid=record["id"]: self._on_delete(rid)
+        )
+        delete_btn.pack(side="right", padx=(4, 0))
 
     def _on_rerun(self, record_id):
         """Fetch record and execute via OperationsPanel."""
@@ -122,6 +140,36 @@ class HistoryPanel(ctk.CTkFrame):
         else:
             # For non-db2db, run directly since the form is db2db-oriented
             self.app.ops_panel.run_history_record(record)
+
+    def _on_delete(self, record_id):
+        """Ask confirmation then delete the history record."""
+        import tkinter.messagebox as mb
+        confirmed = mb.askyesno(
+            "Delete Record",
+            f"Delete history record {record_id}?\nThis cannot be undone.",
+        )
+        if not confirmed:
+            return
+        ok = api.delete_history_record(record_id)
+        if ok:
+            self._refresh_list(force=True)
+        else:
+            mb.showerror("Error", f"Failed to delete record {record_id}.")
+
+    def _on_delete_all(self):
+        """Ask confirmation then clear all history records."""
+        import tkinter.messagebox as mb
+        confirmed = mb.askyesno(
+            "Delete All History",
+            "Delete all history records?\nThis cannot be undone.",
+        )
+        if not confirmed:
+            return
+        ok = api.clear_history()
+        if ok:
+            self._refresh_list(force=True)
+        else:
+            mb.showerror("Error", "Failed to clear history.")
 
     def _now(self):
         from datetime import datetime

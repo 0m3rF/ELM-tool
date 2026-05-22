@@ -138,11 +138,9 @@ class EnvironmentFormPanel(ctk.CTkFrame):
         self.title_label = ctk.CTkLabel(
             self, text="Environment Details", font=("", 18, "bold")
         )
-        self.title_label.pack(anchor="w", padx=16, pady=(16, 8))
 
         # Form container (scrollable so all fields remain accessible on small screens)
         self.form_container = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        self.form_container.pack(fill="both", expand=True, padx=16, pady=8)
 
         # Build form fields
         self.fields = {}
@@ -150,18 +148,33 @@ class EnvironmentFormPanel(ctk.CTkFrame):
 
         # Button row
         self.button_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.button_frame.pack(fill="x", padx=16, pady=(8, 0))
         self._build_buttons()
 
         # Error label
         self.error_label = ctk.CTkLabel(
             self, text="", text_color="#DC3545", font=("", 12)
         )
-        self.error_label.pack(anchor="w", padx=16, pady=(8, 0))
 
         # Status label
         self.status_label = ctk.CTkLabel(self, text="", font=("", 12))
-        self.status_label.pack(anchor="w", padx=16, pady=(4, 16))
+
+        # Collect all panels that are toggled per-mode
+        self._form_panels = [
+            self.title_label,
+            self.form_container,
+            self.button_frame,
+            self.error_label,
+            self.status_label,
+        ]
+
+        # Pack order and kwargs for each panel when visible
+        self._form_panel_pack_kwargs = {
+            self.title_label:    dict(anchor="w", padx=16, pady=(16, 8)),
+            self.form_container: dict(fill="both", expand=True, padx=16, pady=8),
+            self.button_frame:   dict(fill="x", padx=16, pady=(8, 0)),
+            self.error_label:    dict(anchor="w", padx=16, pady=(8, 0)),
+            self.status_label:   dict(anchor="w", padx=16, pady=(4, 16)),
+        }
 
         self.set_mode("idle")
 
@@ -253,6 +266,17 @@ class EnvironmentFormPanel(ctk.CTkFrame):
             command=self._on_discard,
         )
 
+    def _show_form_panels(self):
+        """Pack all main form panels in order."""
+        for panel in self._form_panels:
+            panel.pack_forget()
+            panel.pack(**self._form_panel_pack_kwargs[panel])
+
+    def _hide_form_panels(self):
+        """Unpack all main form panels."""
+        for panel in self._form_panels:
+            panel.pack_forget()
+
     def set_mode(self, mode, env_name=None, env_data=None):
         """Switch form state machine: idle, create, or edit."""
         self.mode = mode
@@ -269,10 +293,11 @@ class EnvironmentFormPanel(ctk.CTkFrame):
         self.encrypt_key_entry.pack_forget()
 
         if mode == "idle":
-            self.title_label.configure(text="Environment Details")
+            self._hide_form_panels()
             self._clear_fields()
             self._set_fields_state("disabled")
         elif mode == "create":
+            self._show_form_panels()
             self.title_label.configure(text="New Environment")
             self._clear_fields()
             self._set_fields_state("normal")
@@ -280,6 +305,7 @@ class EnvironmentFormPanel(ctk.CTkFrame):
             self.save_btn.pack(side="left", padx=(0, 8))
             self.discard_btn.pack(side="left", padx=(0, 8))
         elif mode == "edit":
+            self._show_form_panels()
             self.title_label.configure(text=env_name or "Environment Details")
             self._clear_fields()
             self._populate_fields(env_data)

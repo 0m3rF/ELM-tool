@@ -162,3 +162,39 @@ class HistoryRecorder:
             return False
         except Exception:
             return False
+
+    def delete_record(self, record_id: int) -> bool:
+        """Delete a single history record by ID. Returns True if deleted."""
+        try:
+            history_file = self.config.get_history_file()
+            with file_lock(history_file):
+                records = self._read_records(history_file)
+                new_records = [r for r in records if r.id != record_id]
+                if len(new_records) == len(records):
+                    return False
+                backup_path = self._create_backup(history_file)
+                try:
+                    self._write_records(history_file, new_records)
+                    self._verify_and_cleanup(history_file, backup_path)
+                except Exception:
+                    self._restore_from_backup(history_file, backup_path)
+                    return False
+            return True
+        except Exception:
+            return False
+
+    def clear_history(self) -> bool:
+        """Delete all history records. Returns True on success."""
+        try:
+            history_file = self.config.get_history_file()
+            with file_lock(history_file):
+                backup_path = self._create_backup(history_file)
+                try:
+                    self._write_records(history_file, [])
+                    self._verify_and_cleanup(history_file, backup_path)
+                except Exception:
+                    self._restore_from_backup(history_file, backup_path)
+                    return False
+            return True
+        except Exception:
+            return False
