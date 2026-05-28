@@ -54,3 +54,4 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build]
 packages = ["elm"]
+artifacts = ["elm/assets/*"]
