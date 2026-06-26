@@ -7,6 +7,8 @@ Launched by elm.py when CLI is invoked without arguments.
 
 import customtkinter as ctk
 import sys
+import tkinter as tk
+from pathlib import Path
 
 
 class ELMApp(ctk.CTk):
@@ -36,11 +38,24 @@ class ELMApp(ctk.CTk):
         ctk.set_appearance_mode("system")
         ctk.set_default_color_theme("dark-blue")
 
+        # Window icon
+        self._set_window_icon()
+
         # Clean shutdown on window close
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # Build the tabbed layout
         self._build_tabs()
+
+    def _set_window_icon(self):
+        assets_dir = Path(__file__).parent.parent / "assets"
+        icons = []
+        for size in (512, 256, 128, 64, 32, 16):
+            p = assets_dir / f"icon_{size}.png"
+            if p.exists():
+                icons.append(tk.PhotoImage(file=str(p)))
+        if icons:
+            self.wm_iconphoto(True, *icons)
 
     def _build_tabs(self):
         """Create the CTkTabview with Environments, Operations, and History tabs."""
