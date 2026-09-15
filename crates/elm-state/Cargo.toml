@@ -1,0 +1,25 @@
+[package]
+name = "elm-state"
+description = "Durable SQLite job state and native keychain integration for ELM Tool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+directories.workspace = true
+elm-core = { path = "../elm-core" }
+keyring.workspace = true
+rusqlite.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
+

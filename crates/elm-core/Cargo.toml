@@ -1,0 +1,29 @@
+[package]
+name = "elm-core"
+description = "Canonical types, validation, masking, and connector contracts for ELM Tool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+arrow-array.workspace = true
+arrow-cast.workspace = true
+arrow-schema.workspace = true
+async-trait.workspace = true
+blake3.workspace = true
+chrono.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+arrow-array.workspace = true
+
+[lints]
+workspace = true

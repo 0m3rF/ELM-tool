@@ -1,0 +1,24 @@
+{
+  "name": "elm-desktop-ui",
+  "private": true,
+  "version": "2.0.0-alpha.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 1420",
+    "build": "tsc && vite build",
+    "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.8.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^5.0.2",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.4"
+  }
+}

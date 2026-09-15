@@ -1,0 +1,70 @@
+[workspace]
+members = [
+    "crates/elm-core",
+    "crates/elm-engine",
+    "crates/elm-connectors",
+    "crates/elm-state",
+    "crates/elm-daemon",
+    "crates/elm-cli",
+    "crates/elm-desktop/src-tauri",
+]
+resolver = "2"
+
+[workspace.package]
+version = "2.0.0-alpha.1"
+edition = "2024"
+rust-version = "1.88"
+license = "GPL-3.0-or-later"
+authors = ["Omer Faruk Kirli"]
+repository = "https://github.com/0m3rF/ELM-tool"
+
+[workspace.dependencies]
+anyhow = "1"
+arrow-array = "59"
+arrow-buffer = "59"
+arrow-cast = "59"
+arrow-csv = "59"
+arrow-json = "59"
+arrow-schema = { version = "59", features = ["serde"] }
+async-trait = "0.1"
+base64 = "0.22"
+blake3 = "1"
+bytes = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+constant_time_eq = "0.4"
+directories = "6"
+futures = "0.3"
+fs2 = "0.4"
+keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service", "crypto-rust"] }
+parquet = { version = "59", features = ["arrow", "async"] }
+rand = "0.9"
+rand_chacha = "0.9"
+rpassword = "7"
+rusqlite = { version = "0.37", features = ["bundled", "chrono", "uuid"] }
+secrecy = { version = "0.10", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1", features = ["serde", "v4", "v7"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+large_enum_variant = "allow"
+missing_errors_doc = "allow"
+struct_excessive_bools = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

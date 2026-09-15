@@ -1,0 +1,4 @@
+row_id,nullable_text,unicode_text,decimal_38_9,timestamp_utc,binary_hex,lob_text
+1,,İstanbul 🌍,12345678901234567890.123456789,2026-09-04T12:34:56.123456789Z,00ff10,narrow
+2,present,東京,-0.000000001,1970-01-01T00:00:00Z,deadbeef,wide-row-marker
+

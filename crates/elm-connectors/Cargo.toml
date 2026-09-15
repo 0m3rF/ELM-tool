@@ -1,0 +1,53 @@
+[package]
+name = "elm-connectors"
+description = "Streaming file and database connectors for ELM Tool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = []
+postgresql = ["dep:bytes", "dep:chrono", "dep:futures", "dep:native-tls", "dep:postgres-native-tls", "dep:tokio-postgres", "dep:postgres-types"]
+mysql = ["dep:bytes", "dep:chrono", "dep:futures", "dep:mysql_async"]
+sql-server = ["dep:odbc-api", "dep:chrono"]
+oracle = ["dep:oracle", "dep:chrono"]
+all-databases = ["postgresql", "mysql", "sql-server", "oracle"]
+
+[dependencies]
+arrow-array.workspace = true
+arrow-csv.workspace = true
+arrow-json.workspace = true
+arrow-schema.workspace = true
+async-trait.workspace = true
+blake3.workspace = true
+bytes = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
+elm-core = { path = "../elm-core" }
+futures = { workspace = true, optional = true }
+mysql_async = { version = "0.36", optional = true, default-features = false, features = ["minimal-rust", "native-tls-tls"] }
+native-tls = { version = "0.2", optional = true }
+# Use UTF-16 API entry points on every platform, independent of the process locale.
+odbc-api = { version = "15", optional = true, default-features = false, features = ["odbc_version_3_80", "wide"] }
+oracle = { version = "0.6", optional = true }
+parquet.workspace = true
+postgres-types = { version = "0.2", optional = true, features = ["with-chrono-0_4"] }
+postgres-native-tls = { version = "0.5", optional = true }
+serde_json.workspace = true
+serde.workspace = true
+secrecy.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tokio-postgres = { version = "0.7", optional = true, features = ["runtime", "with-chrono-0_4"] }
+
+[dev-dependencies]
+elm-engine = { path = "../elm-engine" }
+tempfile.workspace = true
+tokio-util.workspace = true
+
+[[example]]
+name = "postgres_performance"
+required-features = ["postgresql"]
+
+[lints]
+workspace = true

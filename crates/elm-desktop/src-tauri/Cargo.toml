@@ -1,0 +1,32 @@
+[package]
+name = "elm-desktop"
+description = "Tauri 2 desktop shell for ELM Tool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "elm_desktop"
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "elm-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+chrono.workspace = true
+elm-core = { path = "../../elm-core" }
+elm-daemon = { path = "../../elm-daemon" }
+elm-state = { path = "../../elm-state" }
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2", features = [] }
+tokio.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,36 @@
+name: Oracle integration
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "crates/elm-connectors/**"
+      - "crates/elm-core/**"
+      - "crates/elm-engine/**"
+      - "crates/elm-daemon/**"
+      - "crates/elm-state/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "tests/oracle/**"
+      - ".github/workflows/oracle.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate disposable fixture credential
+        shell: bash
+        run: |
+          fixture_password="Elm-$(openssl rand -hex 12)!"
+          echo "::add-mask::$fixture_password"
+          echo "ELM_TEST_ORACLE_PASSWORD=$fixture_password" >> "$GITHUB_ENV"
+      - name: Run native source, sink, recovery, and daemon tests
+        run: docker compose -p elm-oracle-acceptance -f tests/oracle/compose.yml up --build --abort-on-container-exit --exit-code-from tests
+      - name: Remove disposable fixture and build volumes
+        if: always()
+        run: docker compose -p elm-oracle-acceptance -f tests/oracle/compose.yml down --volumes

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "captured_at": null,
+  "host": {
+    "cpu": null,
+    "memory_bytes": null,
+    "storage": null,
+    "operating_system": null
+  },
+  "dataset": {
+    "generator_version": null,
+    "digest": null,
+    "logical_bytes": 10000000000
+  },
+  "results": [
+    { "connector": "postgresql", "python_rows_per_second": null, "rust_rows_per_second": null, "rust_peak_rss_bytes": null },
+    { "connector": "oracle", "python_rows_per_second": null, "rust_rows_per_second": null, "rust_peak_rss_bytes": null },
+    { "connector": "mysql", "python_rows_per_second": null, "rust_rows_per_second": null, "rust_peak_rss_bytes": null },
+    { "connector": "sql_server", "python_rows_per_second": null, "rust_rows_per_second": null, "rust_peak_rss_bytes": null }
+  ]
+}
+

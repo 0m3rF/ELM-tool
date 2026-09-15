@@ -1,0 +1,38 @@
+name: Cross-database acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'crates/elm-core/**'
+      - 'crates/elm-engine/**'
+      - 'crates/elm-connectors/**'
+      - 'tests/cross-database/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/cross-database.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-mysql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate disposable fixture credential
+        shell: bash
+        run: |
+          fixture_password="$(openssl rand -hex 24)"
+          echo "::add-mask::$fixture_password"
+          echo "ELM_MATRIX_PASSWORD=$fixture_password" >> "$GITHUB_ENV"
+      - name: Start isolated databases
+        run: docker compose -p elm-cross-acceptance -f tests/cross-database/compose.yml up -d --wait --wait-timeout 180
+      - name: Verify both transfer directions
+        run: cargo test -p elm-connectors --features postgresql,mysql --test cross_database -- --ignored --test-threads=1
+      - name: Remove disposable fixtures
+        if: always()
+        run: docker compose -p elm-cross-acceptance -f tests/cross-database/compose.yml down --volumes

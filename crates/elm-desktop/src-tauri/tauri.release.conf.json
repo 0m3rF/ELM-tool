@@ -1,0 +1,14 @@
+{
+  "bundle": {
+    "active": true,
+    "category": "Utility",
+    "externalBin": ["binaries/elm-daemon"],
+    "linux": {
+      "deb": { "depends": ["libodbc2"] },
+      "rpm": { "depends": ["unixODBC"] }
+    },
+    "license": "GPL-3.0-or-later",
+    "shortDescription": "Fast, safe, local database transfers",
+    "longDescription": "ELM Tool transfers database and file data through a bounded-memory Arrow pipeline with staged publication and durable recovery."
+  }
+}

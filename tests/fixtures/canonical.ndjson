@@ -1,0 +1,3 @@
+{"row_id":1,"nullable_text":null,"unicode_text":"İstanbul 🌍","decimal_38_9":"12345678901234567890.123456789","timestamp_utc":"2026-09-04T12:34:56.123456789Z","binary_hex":"00ff10","lob_text":"narrow"}
+{"row_id":2,"nullable_text":"present","unicode_text":"東京","decimal_38_9":"-0.000000001","timestamp_utc":"1970-01-01T00:00:00Z","binary_hex":"deadbeef","lob_text":"wide-row-marker"}
+

@@ -1,0 +1,44 @@
+# Disposable Linux x86-64 fixture. No host ports or host client installation.
+services:
+  database:
+    image: gvenzl/oracle-xe:21-slim
+    environment:
+      ORACLE_PASSWORD: ${ELM_TEST_ORACLE_PASSWORD:?Set a disposable fixture password}
+      APP_USER: elm_test
+      APP_USER_PASSWORD: ${ELM_TEST_ORACLE_PASSWORD:?Set a disposable fixture password}
+    volumes:
+      - database:/opt/oracle/oradata
+    # Disposable diagnostics avoid overlay filesystem journal stalls on Docker Desktop.
+    tmpfs:
+      - /opt/oracle/diag:uid=54321,gid=54321,mode=0755,size=256m
+      - /opt/oracle/audit:uid=54321,gid=54321,mode=0755,size=64m
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 30s
+  tests:
+    build: .
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      ELM_TEST_ORACLE_HOST: database
+      ELM_TEST_ORACLE_DATABASE: XEPDB1
+      ELM_TEST_ORACLE_USER: elm_test
+      ELM_TEST_ORACLE_PASSWORD: ${ELM_TEST_ORACLE_PASSWORD:?Set a disposable fixture password}
+      ELM_TEST_ORACLE_SSL_MODE: disable
+      # Cold fixture initialization can exceed the application's 15s default.
+      ELM_TEST_ORACLE_CALL_TIMEOUT_MS: "120000"
+      CARGO_BUILD_JOBS: "4"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    volumes:
+      - ../..:/workspace:ro
+      - build:/build
+      - registry:/usr/local/cargo/registry
+volumes:
+  database:
+  build:
+  registry:

@@ -1,0 +1,34 @@
+# Isolated disposable fixture: no host ports, host drivers, or production data.
+services:
+  database:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${ELM_TEST_SQL_SERVER_PASSWORD:?Set a disposable fixture password}
+    healthcheck:
+      test: ["CMD-SHELL", "SQLCMDPASSWORD=\"$$MSSQL_SA_PASSWORD\" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -Q 'SELECT 1' > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 36
+      start_period: 15s
+  tests:
+    build: .
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      ELM_TEST_SQL_SERVER_HOST: database
+      ELM_TEST_SQL_SERVER_DATABASE: master
+      ELM_TEST_SQL_SERVER_USER: sa
+      ELM_TEST_SQL_SERVER_PASSWORD: ${ELM_TEST_SQL_SERVER_PASSWORD:?Set a disposable fixture password}
+      # Only the isolated fixture network; production defaults remain verified TLS.
+      ELM_TEST_SQL_SERVER_SSL_MODE: disable
+      CARGO_BUILD_JOBS: "4"
+    volumes:
+      - ../..:/workspace:ro
+      - build:/build
+      - registry:/usr/local/cargo/registry
+volumes:
+  build:
+  registry:

@@ -1,0 +1,24 @@
+[package]
+name = "elm-engine"
+description = "Bounded-memory Arrow transfer pipeline for ELM Tool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+arrow-array.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+elm-core = { path = "../elm-core" }
+tempfile.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+arrow-schema.workspace = true
+
+[lints]
+workspace = true
