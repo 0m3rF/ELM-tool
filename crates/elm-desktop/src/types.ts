@@ -116,3 +116,34 @@ export interface MaskRule {
   algorithm: Record<string, unknown> | string;
   environment_id?: string;
 }
+
+export interface PreviewColumn {
+  name: string;
+  source_type: string;
+  output_type: string;
+  nullable: boolean;
+}
+
+export interface ConnectorCapabilities {
+  database: Environment["kind"] | null;
+  native_bulk_read: boolean;
+  native_bulk_write: boolean;
+  atomic_append: boolean;
+  atomic_replace: boolean;
+  non_atomic_replace: boolean;
+  checkpointed_write: boolean;
+  resumable_keyset_read: boolean;
+  supports_lob_spill: boolean;
+}
+
+export interface PreflightReport {
+  capabilities: ConnectorCapabilities;
+  staging_relation: Relation | null;
+  warnings: string[];
+}
+
+export interface TransferPreview {
+  columns: PreviewColumn[];
+  report: PreflightReport;
+  publication_error?: string;
+}

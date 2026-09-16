@@ -299,6 +299,22 @@ async fn save_settings(
 }
 
 #[tauri::command]
+async fn preview_transfer(
+    state: State<'_, DesktopState>,
+    spec: JobSpec,
+) -> Result<elm_core::TransferPreview, String> {
+    match state
+        .client
+        .request(Operation::JobPreview(spec))
+        .await
+        .map_err(public_message)?
+    {
+        Response::Preview(value) => Ok(value),
+        _ => Err("daemon returned an unexpected response".into()),
+    }
+}
+
+#[tauri::command]
 async fn submit_job(
     state: State<'_, DesktopState>,
     spec: JobSpec,
@@ -425,6 +441,7 @@ pub fn run() {
                 test_mask,
                 get_settings,
                 save_settings,
+                preview_transfer,
                 submit_job,
                 list_jobs,
                 job_action,

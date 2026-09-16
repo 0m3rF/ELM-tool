@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::{
     Environment, EnvironmentId, JobId, JobProgress, JobRecord, JobSpec, MaskRule, MaskRuleId,
-    PublicError, RuntimeSettings,
+    PublicError, RuntimeSettings, TransferPreview,
 };
 
 pub const IPC_PROTOCOL_VERSION: u16 = 1;
@@ -59,6 +59,8 @@ pub enum Operation {
     SettingsGet,
     #[serde(rename = "settings.set")]
     SettingsSet(RuntimeSettings),
+    #[serde(rename = "job.preview")]
+    JobPreview(JobSpec),
     #[serde(rename = "job.submit")]
     JobSubmit(JobSpec),
     #[serde(rename = "job.get")]
@@ -95,4 +97,5 @@ pub enum Response {
     Job(JobRecord),
     Jobs(Vec<JobRecord>),
     Event(JobProgress),
+    Preview(TransferPreview),
 }

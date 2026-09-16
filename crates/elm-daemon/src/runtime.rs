@@ -11,16 +11,17 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use elm_connectors::{
-    FileSource, FileSourceCheckpoint, MySqlSink, MySqlSource, PostgresSink, PostgresSource,
-    RecoverableFileSink, cleanup_mysql_staging, cleanup_postgres_staging,
+    FileSink, FileSource, FileSourceCheckpoint, MySqlSink, MySqlSource, PostgresSink,
+    PostgresSource, RecoverableFileSink, cleanup_mysql_staging, cleanup_postgres_staging,
     cleanup_recoverable_staging, connector_diagnostic, mysql_published_rows,
     oracle_sink::{OracleSink, cleanup_oracle_staging, oracle_published_rows},
     sql_server_sink::{SqlServerSink, cleanup_sql_server_staging, sql_server_published_rows},
     test_mysql_environment, test_postgres_environment,
 };
 use elm_core::{
-    BatchCheckpoint, DataSink, DataSource, DatabaseKind, DatabaseSelection, ElmError,
-    EnvironmentId, JobId, JobProgress, JobSpec, JobState, Result, SinkSpec, SourceSpec,
+    BatchCheckpoint, ConversionPlan, DataSink, DataSource, DatabaseKind, DatabaseSelection,
+    ElmError, EnvironmentId, JobId, JobProgress, JobSpec, JobState, PreviewColumn, Result,
+    SinkSpec, SourceSpec, TransferPreview,
     masking::mask_text,
     protocol::{IPC_PROTOCOL_VERSION, Operation, RequestEnvelope, Response, ResponseEnvelope},
 };
@@ -172,6 +173,7 @@ impl DaemonRuntime {
                 self.store.save_settings(settings)?;
                 Ok(Response::Settings(settings))
             }
+            Operation::JobPreview(spec) => self.preview_job(spec).await,
             Operation::JobSubmit(spec) => {
                 let record = self.store.create_job(&spec)?;
                 self.spawn_job(spec, None)?;
@@ -322,6 +324,43 @@ impl DaemonRuntime {
                 Ok(Response::Ack)
             }
         }
+    }
+
+    /// Runs real preflight against the job's actual source and destination without executing
+    /// the transfer: no staging is created, no rows move, and no recovery resource is recorded.
+    /// Every connector's `preflight()` is a read-only privilege/schema check by contract (the
+    /// same one `execute_job` runs immediately before `begin()`), so this call has no more
+    /// side effects than `EnvironmentTest` does.
+    async fn preview_job(&self, spec: JobSpec) -> Result<Response> {
+        spec.validate()?;
+        let mut source = open_preview_source(&spec, &self.store).await?;
+        let schema = source.schema().await?;
+        let plan = ConversionPlan::new(schema, &spec.conversions)?;
+        let mut sink = open_preview_sink(&spec, &self.store).await?;
+        let report = sink
+            .preflight(plan.output_schema(), spec.write_mode, spec.consistency)
+            .await?;
+        let publication_error = report
+            .require_safe_publication(spec.write_mode, spec.consistency)
+            .err()
+            .map(|error| error.to_public().message);
+        let columns = plan
+            .input_schema()
+            .fields()
+            .iter()
+            .zip(plan.output_schema().fields())
+            .map(|(input, output)| PreviewColumn {
+                name: input.name().clone(),
+                source_type: input.data_type().to_string(),
+                output_type: output.data_type().to_string(),
+                nullable: output.is_nullable(),
+            })
+            .collect();
+        Ok(Response::Preview(TransferPreview {
+            columns,
+            report,
+            publication_error,
+        }))
     }
 
     fn spawn_job(&self, spec: JobSpec, checkpoint: Option<BatchCheckpoint>) -> Result<()> {
@@ -501,6 +540,113 @@ impl DaemonRuntime {
         writer.flush().await?;
         Ok(())
     }
+}
+
+/// Opens a fresh (non-resuming) source connector for preview purposes only. Mirrors the
+/// `SourceSpec::Database`/`SourceSpec::File` construction in `execute_job`, minus checkpoint
+/// resume: a preview always reads the source's current state, never a saved resume position.
+async fn open_preview_source(spec: &JobSpec, store: &StateStore) -> Result<Box<dyn DataSource>> {
+    Ok(match &spec.source {
+        SourceSpec::File {
+            path: source_path,
+            format: source_format,
+        } => Box::new(FileSource::open(source_path, *source_format)?),
+        SourceSpec::Database {
+            environment_id,
+            selection,
+            resume_key,
+        } => {
+            let environment = store.get_environment(*environment_id)?;
+            validate_source_resume(environment.kind, !resume_key.is_empty())?;
+            let password = KeyringVault::default().get(&environment.credential_ref)?;
+            match environment.kind {
+                DatabaseKind::PostgreSql => Box::new(
+                    PostgresSource::connect(&environment, password.expose_secret(), selection)
+                        .await?,
+                ),
+                DatabaseKind::MySql => Box::new(
+                    MySqlSource::connect(&environment, password.expose_secret(), selection).await?,
+                ),
+                DatabaseKind::SqlServer => Box::new(
+                    elm_connectors::SqlServerSource::connect(
+                        &environment,
+                        password.expose_secret(),
+                        selection,
+                    )
+                    .await?,
+                ),
+                DatabaseKind::Oracle => Box::new(
+                    elm_connectors::oracle_source::OracleSource::connect(
+                        &environment,
+                        password.expose_secret(),
+                        selection,
+                    )
+                    .await?,
+                ),
+            }
+        }
+    })
+}
+
+/// Opens a fresh sink connector for preview purposes only: connects and, for database sinks,
+/// computes staging/backup names, but never registers a recovery resource and is never
+/// `begin()`-ed, so no staging DDL runs and nothing needs to be cleaned up afterward.
+async fn open_preview_sink(spec: &JobSpec, store: &StateStore) -> Result<Box<dyn DataSink>> {
+    Ok(match &spec.sink {
+        SinkSpec::File {
+            path: sink_path,
+            format: sink_format,
+        } => Box::new(FileSink::new(sink_path, *sink_format)),
+        SinkSpec::Database {
+            environment_id,
+            relation,
+        } => {
+            let environment = store.get_environment(*environment_id)?;
+            let password = KeyringVault::default().get(&environment.credential_ref)?;
+            match environment.kind {
+                DatabaseKind::PostgreSql => Box::new(
+                    PostgresSink::connect(
+                        &environment,
+                        password.expose_secret(),
+                        relation.clone(),
+                        spec.id,
+                        None,
+                    )
+                    .await?,
+                ),
+                DatabaseKind::MySql => Box::new(
+                    MySqlSink::connect(
+                        &environment,
+                        password.expose_secret(),
+                        relation.clone(),
+                        spec.id,
+                        None,
+                    )
+                    .await?,
+                ),
+                DatabaseKind::SqlServer => Box::new(
+                    SqlServerSink::connect(
+                        &environment,
+                        password.expose_secret(),
+                        relation.clone(),
+                        spec.id,
+                        None,
+                    )
+                    .await?,
+                ),
+                DatabaseKind::Oracle => Box::new(
+                    OracleSink::connect(
+                        &environment,
+                        password.expose_secret(),
+                        relation.clone(),
+                        spec.id,
+                        None,
+                    )
+                    .await?,
+                ),
+            }
+        }
+    })
 }
 
 async fn execute_job(

@@ -10,6 +10,23 @@ prevent duplicates.
 State is stored in the OS per-user local data directory as `elm-v2.sqlite3`. `daemon.token` is an
 authentication secret, not a portable configuration file. Do not copy either file between users.
 
+## Transfer preview
+
+`job.preview` (CLI: `elm copy <db-to-db|db-to-file|file-to-db> ... --dry-run`; desktop: the "Run
+preview" button on the New Transfer wizard's Review step) runs the same real preflight a submitted
+job runs — opening the actual source and destination, checking privileges, and computing the
+destination schema — without moving any rows, creating any job, or leaving anything behind. It
+never calls a connector's `begin()`, which is the only place staging DDL or file creation happens;
+preflight itself is a read-only privilege/schema check by contract (`docs/connectors.md`'s own
+matrix depends on this). A preview response reports the destination columns (source and output
+type per column, after any configured conversions), the sink's capabilities and warnings, and
+whether the requested write mode and consistency combination can publish safely — the same check
+`require_safe_publication` runs immediately before every real job's `begin()`, surfaced here as
+data instead of a hard failure so the wizard can show it before submission. Live-tested on
+2026-09-16 against the disposable PostgreSQL fixture and file source/sink pairs: a preview never
+creates the destination table or file, is never visible through `job.list`/`job.get`, and an
+unsafe write-mode/consistency combination is reported, not thrown.
+
 ## Same-table copies
 
 Live acceptance tests verify fresh staged jobs that read and write the same base table

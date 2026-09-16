@@ -29,6 +29,7 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+arrow-array.workspace = true
 oracle = "0.6"
 tempfile.workspace = true
 

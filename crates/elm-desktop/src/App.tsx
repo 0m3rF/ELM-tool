@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { invoke, Channel } from "@tauri-apps/api/core";
-import type { Environment, EnvironmentDraft, FileFormat, JobProgress, JobRecord, JobSpec, MaskRule, Relation, RuntimeSettings, SinkSpec, SourceSpec } from "./types";
+import type { Environment, EnvironmentDraft, FileFormat, JobProgress, JobRecord, JobSpec, MaskRule, Relation, RuntimeSettings, SinkSpec, SourceSpec, TransferPreview } from "./types";
 
 type Screen = "connections" | "transfer" | "jobs" | "masks" | "settings";
 
@@ -138,32 +138,53 @@ function NewTransfer({ onSubmitted }: { onSubmitted: () => void }) {
   const [consistency, setConsistency] = useState<JobSpec["consistency"]>("atomic");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [preview, setPreview] = useState<TransferPreview>();
   const [settings, setSettings] = useState<RuntimeSettings>({ memory_budget_bytes: 512 * 1024 * 1024, batch_target_bytes: 16 * 1024 * 1024 });
   useEffect(() => { void invoke<Environment[]>("list_environments").then((items) => {
     setEnvironments(items);
     if (items[0]) { setSourceEnvironment((value) => value || items[0].id); setTargetEnvironment((value) => value || items[0].id); }
   }).catch((value) => setError(String(value))); }, []);
   useEffect(() => { void invoke<RuntimeSettings>("get_settings").then(setSettings).catch((value) => setError(String(value))); }, []);
+  // Any field that changes what would be transferred invalidates a prior preview: the reviewed
+  // columns and publication safety no longer describe what "Submit transfer" would actually run.
+  useEffect(() => { setPreview(undefined); setPreviewError(""); }, [
+    direction, sourceEnvironment, targetEnvironment, sourceValue, sourceIsQuery,
+    targetTable, filePath, format, writeMode, consistency,
+  ]);
+  const buildSpec = (): JobSpec => {
+    const source: SourceSpec = direction === "file-to-db"
+      ? { kind: "file", path: filePath, format }
+      : { kind: "database", environment_id: sourceEnvironment, selection: sourceIsQuery ? { kind: "query", sql: sourceValue } : { kind: "table", relation: parseRelation(sourceValue) }, resume_key: [] };
+    const sink: SinkSpec = direction === "db-to-file"
+      ? { kind: "file", path: filePath, format }
+      : { kind: "database", environment_id: targetEnvironment, relation: parseRelation(targetTable) };
+    const seed = new Uint8Array(32); crypto.getRandomValues(seed);
+    return {
+      version: 1, id: crypto.randomUUID(), name: `${direction} transfer`, source, sink,
+      write_mode: writeMode, consistency, memory_budget_bytes: settings.memory_budget_bytes,
+      batch_target_bytes: settings.batch_target_bytes, masks: [], random_seed: Array.from(seed),
+      conversions: [], submitted_at: new Date().toISOString(),
+    };
+  };
+  const runPreview = async () => {
+    setPreviewError(""); setError(""); setPreviewing(true);
+    try {
+      const spec = buildSpec();
+      setPreview(await invoke<TransferPreview>("preview_transfer", { spec }));
+    } catch (value) { setPreviewError(String(value)); setPreview(undefined); }
+    finally { setPreviewing(false); }
+  };
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setError(""); setSubmitting(true);
     try {
-      const source: SourceSpec = direction === "file-to-db"
-        ? { kind: "file", path: filePath, format }
-        : { kind: "database", environment_id: sourceEnvironment, selection: sourceIsQuery ? { kind: "query", sql: sourceValue } : { kind: "table", relation: parseRelation(sourceValue) }, resume_key: [] };
-      const sink: SinkSpec = direction === "db-to-file"
-        ? { kind: "file", path: filePath, format }
-        : { kind: "database", environment_id: targetEnvironment, relation: parseRelation(targetTable) };
-      const seed = new Uint8Array(32); crypto.getRandomValues(seed);
-      const spec: JobSpec = {
-        version: 1, id: crypto.randomUUID(), name: `${direction} transfer`, source, sink,
-        write_mode: writeMode, consistency, memory_budget_bytes: settings.memory_budget_bytes,
-        batch_target_bytes: settings.batch_target_bytes, masks: [], random_seed: Array.from(seed),
-        conversions: [], submitted_at: new Date().toISOString(),
-      };
+      const spec = buildSpec();
       await invoke<JobRecord>("submit_job", { spec }); onSubmitted();
     } catch (value) { setError(String(value)); }
     finally { setSubmitting(false); }
   };
+  const reviewed = Boolean(preview) && !preview?.publication_error;
   return <section>
     <Header eyebrow="Transfer wizard" title="New transfer" detail="Preflight catches unsafe privileges and lossy mappings before data moves." />
     {error && <div role="alert" className="alert">{error}</div>}
@@ -180,7 +201,21 @@ function NewTransfer({ onSubmitted }: { onSubmitted: () => void }) {
       <label>Write mode<select value={writeMode} onChange={(event) => setWriteMode(event.target.value as JobSpec["write_mode"])}><option value="append">Append</option><option value="replace">Replace</option><option value="fail">Fail if destination exists</option></select></label>
       <div className="callout wide"><strong>Publication guarantee</strong><p>The target stays unchanged until staging validation succeeds. ELM will stop if your account cannot publish safely.</p></div>
       <div className="callout warning wide"><strong>Alpha database boundary</strong><p>Database connectors have limited type mappings. PostgreSQL supports keyset resume; other database sources restart from zero. SQL Server requires Driver 18; Oracle requires Instant Client. Oracle uses bounded native array fetching and batch DML staging. Existing Oracle targets support atomic APPEND or explicit non-atomic table-swap REPLACE. A swap retains the old table's indexes, grants, and constraints on its backup, not on the replacement. Backups remain until job deletion. LOB support and large-workload performance qualification remain pending.</p></div>
-      <div className="wide footer-actions"><button className="primary" type="submit" disabled={submitting}>{submitting ? "Submitting…" : "Submit transfer"}</button></div>
+      <div className="wide">
+        <div className="editor-heading"><h2>4. Review</h2><button type="button" onClick={() => void runPreview()} disabled={previewing}>{previewing ? "Checking…" : "Run preview"}</button></div>
+        {previewError && <div role="alert" className="alert">{previewError}</div>}
+        {preview && <div className="panel">
+          <table><thead><tr><th>Column</th><th>Source type</th><th>Destination type</th><th>Nullable</th></tr></thead><tbody>
+            {preview.columns.map((column) => <tr key={column.name}><td><code>{column.name}</code></td><td>{column.source_type}</td><td>{column.output_type}</td><td>{column.nullable ? "yes" : "no"}</td></tr>)}
+          </tbody></table>
+          {preview.report.warnings.map((warning) => <div key={warning} role="status" className="alert wide">{warning}</div>)}
+          {preview.publication_error
+            ? <div role="alert" className="alert wide"><strong>This configuration cannot publish safely</strong><p>{preview.publication_error}</p></div>
+            : <div role="status" className="success">Preflight passed. This configuration can publish safely with the requested write mode and consistency.</div>}
+        </div>}
+        {!preview && !previewError && <p>Run a preview to see the destination columns and confirm the requested write mode and consistency are safe, before any data moves.</p>}
+      </div>
+      <div className="wide footer-actions"><button className="primary" type="submit" disabled={submitting || !reviewed} title={reviewed ? undefined : "Run a preview that passes before submitting"}>{submitting ? "Submitting…" : "Submit transfer"}</button></div>
     </form>
   </section>;
 }

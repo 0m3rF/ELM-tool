@@ -145,6 +145,27 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
 ## 4. Desktop acceptance
 
 - [ ] Complete/verify connection diagnostics, transfer preview, and wizard validation.
+  Transfer preview added on 2026-09-16 and live-tested: a new `job.preview` daemon operation
+  (`crates/elm-daemon/src/runtime.rs`) opens the job's real source and destination and runs the
+  same real, read-only `preflight()` a submitted job runs — reporting destination columns
+  (source/output type per column after conversions), connector capabilities/warnings, and
+  whether the requested write mode/consistency can publish safely — without calling `begin()`,
+  so no staging DDL, file creation, or job record is ever produced. Exposed as `--dry-run` on
+  `elm copy ...` (elm-cli) and as a "Run preview" step gating "Submit transfer" on the desktop
+  New Transfer wizard (`crates/elm-desktop/src/App.tsx`; any field change invalidates a prior
+  preview). Live-tested 2026-09-16: two fast file-based daemon IPC tests
+  (`crates/elm-daemon/tests/ipc.rs`) plus one live test against the disposable PostgreSQL
+  fixture (`crates/elm-daemon/tests/postgres_preview.rs`, `--ignored`, matching the existing
+  Oracle daemon test's convention) confirming a preview never creates the destination table,
+  never appears in `job.list`, and reports (not throws) an unsafe write-mode/consistency
+  combination. `cargo fmt`, `cargo clippy -D warnings`, and the full `cargo test --workspace
+  --all-features` suite pass; `npm run build` (tsc + vite) passes for the desktop frontend.
+  Connection diagnostics (`environment.test`, a real live connection attempt with a typed error)
+  already existed and were not changed. **Not done**: wizard validation is still only HTML5
+  `required` fields plus basic relation-string parsing — no deeper checks (e.g. duplicate
+  masking rules, oversized batch settings) were added, and none of this was exercised through
+  an actual running GUI window in this session (no GUI automation tool was available), only
+  through the daemon/CLI layer and a `tsc`/`vite` build of the frontend.
 - [ ] Test live progress, close/reconnect, cancellation, resume/restart, history filtering, and actionable failures.
 - [ ] Verify masking configuration and deterministic retry/resume behavior through the UI.
 - [ ] Resolve pause semantics and UI behavior; do not advertise unimplemented actions.
@@ -227,4 +248,6 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
 - `benchmarks/README.md`: benchmark methodology, checker, Rust and installed-Python probes.
 - `benchmark-results/`: local ignored measured results (not guaranteed to exist in a fresh clone).
 - `crates/elm-connectors/tests/`, `crates/elm-daemon/tests/`: correctness/recovery tests.
-- `docs/connectors.md`, `docs/operations.md`: current restrictions and recovery behavior.
+  `crates/elm-daemon/tests/ipc.rs` and `postgres_preview.rs` cover the `job.preview` operation.
+- `docs/connectors.md`, `docs/operations.md`: current restrictions and recovery behavior; see
+  `docs/operations.md`'s "Transfer preview" section for `job.preview`/`--dry-run`.

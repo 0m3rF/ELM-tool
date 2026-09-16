@@ -9,7 +9,8 @@ pub mod semantics;
 pub mod types;
 
 pub use connector::{
-    BatchCheckpoint, ConnectorCapabilities, DataSink, DataSource, PreflightReport,
+    BatchCheckpoint, ConnectorCapabilities, DataSink, DataSource, PreflightReport, PreviewColumn,
+    TransferPreview,
 };
 pub use conversion::ConversionPlan;
 pub use error::{ElmError, ErrorCode, PublicError, Result};

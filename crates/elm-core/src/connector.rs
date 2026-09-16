@@ -28,6 +28,25 @@ pub struct PreflightReport {
     pub warnings: Vec<String>,
 }
 
+/// A column as it will actually reach the destination, after any configured conversions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewColumn {
+    pub name: String,
+    pub source_type: String,
+    pub output_type: String,
+    pub nullable: bool,
+}
+
+/// The result of running preflight against a job's real source and destination without
+/// executing the transfer: no staging is created, no rows move, and no target is touched
+/// beyond the read-only privilege/schema checks each connector's `preflight()` already performs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransferPreview {
+    pub columns: Vec<PreviewColumn>,
+    pub report: PreflightReport,
+    pub publication_error: Option<String>,
+}
+
 impl PreflightReport {
     pub fn require_safe_publication(
         &self,

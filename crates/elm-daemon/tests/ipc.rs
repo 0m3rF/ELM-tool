@@ -213,3 +213,110 @@ async fn daemon_resume_reuses_checkpointed_file_staging_without_duplicate_rows()
         .unwrap_or_else(|error| panic!("{error}"))
         .unwrap_or_else(|error| panic!("{error}"));
 }
+
+#[tokio::test]
+async fn preview_reports_columns_without_moving_data_or_creating_a_job() {
+    let directory = tempdir().unwrap_or_else(|error| panic!("{error}"));
+    let paths = RuntimePaths::for_data_directory(directory.path().join("state"))
+        .unwrap_or_else(|error| panic!("{error}"));
+    let runtime = DaemonRuntime::open(paths.clone()).unwrap_or_else(|error| panic!("{error}"));
+    let daemon = tokio::spawn(runtime.serve());
+    let client = DaemonClient::connect(paths.clone()).unwrap_or_else(|error| panic!("{error}"));
+
+    let input = directory.path().join("input.csv");
+    let output = directory.path().join("output.ndjson");
+    fs::write(&input, "id,name\n1,Alice\n2,İstanbul 🌍\n")
+        .unwrap_or_else(|error| panic!("{error}"));
+    let spec = JobSpec::new(
+        SourceSpec::File {
+            path: input,
+            format: FileFormat::Csv,
+        },
+        SinkSpec::File {
+            path: output.clone(),
+            format: FileFormat::Ndjson,
+        },
+    );
+    let id = spec.id;
+
+    let response = client
+        .request(Operation::JobPreview(spec))
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let Response::Preview(preview) = response else {
+        panic!("expected a preview response, got {response:?}");
+    };
+    assert_eq!(preview.columns.len(), 2);
+    assert_eq!(preview.columns[0].name, "id");
+    assert_eq!(preview.columns[1].name, "name");
+    assert!(preview.publication_error.is_none());
+
+    // A preview must never create the destination, never register a job, and never leave
+    // anything for job.list or job.get to see.
+    assert!(!output.exists());
+    let jobs = match client
+        .request(Operation::JobList)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+    {
+        Response::Jobs(jobs) => jobs,
+        other => panic!("expected a jobs response, got {other:?}"),
+    };
+    assert!(!jobs.iter().any(|job| job.spec.id == id));
+
+    client
+        .request(Operation::DaemonStop)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    tokio::time::timeout(Duration::from_secs(5), daemon)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+        .unwrap_or_else(|error| panic!("{error}"))
+        .unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[tokio::test]
+async fn preview_surfaces_an_unsafe_publication_combination_without_erroring() {
+    let directory = tempdir().unwrap_or_else(|error| panic!("{error}"));
+    let paths = RuntimePaths::for_data_directory(directory.path().join("state"))
+        .unwrap_or_else(|error| panic!("{error}"));
+    let runtime = DaemonRuntime::open(paths.clone()).unwrap_or_else(|error| panic!("{error}"));
+    let daemon = tokio::spawn(runtime.serve());
+    let client = DaemonClient::connect(paths.clone()).unwrap_or_else(|error| panic!("{error}"));
+
+    let input = directory.path().join("input.csv");
+    let output = directory.path().join("output.ndjson");
+    fs::write(&input, "id\n1\n").unwrap_or_else(|error| panic!("{error}"));
+    let mut spec = JobSpec::new(
+        SourceSpec::File {
+            path: input,
+            format: FileFormat::Csv,
+        },
+        SinkSpec::File {
+            path: output.clone(),
+            format: FileFormat::Ndjson,
+        },
+    );
+    // The file connector does not implement checkpointed writes.
+    spec.consistency = ConsistencyMode::Checkpointed;
+
+    let response = client
+        .request(Operation::JobPreview(spec))
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let Response::Preview(preview) = response else {
+        panic!("expected a preview response, got {response:?}");
+    };
+    assert!(preview.publication_error.is_some());
+    assert!(!output.exists());
+
+    client
+        .request(Operation::DaemonStop)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    tokio::time::timeout(Duration::from_secs(5), daemon)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+        .unwrap_or_else(|error| panic!("{error}"))
+        .unwrap_or_else(|error| panic!("{error}"));
+}

@@ -83,6 +83,11 @@ impl ConversionPlan {
         self.output_schema.clone()
     }
 
+    #[must_use]
+    pub fn input_schema(&self) -> Arc<Schema> {
+        self.input_schema.clone()
+    }
+
     pub fn apply(&self, batch: &RecordBatch) -> Result<RecordBatch> {
         if batch.schema().as_ref() != self.input_schema.as_ref() {
             return Err(ElmError::TypeMapping(

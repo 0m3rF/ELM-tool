@@ -1493,6 +1493,7 @@ name = "elm-daemon"
 version = "2.0.0-alpha.1"
 dependencies = [
  "anyhow",
+ "arrow-array",
  "async-trait",
  "blake3",
  "chrono",

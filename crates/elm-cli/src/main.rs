@@ -243,6 +243,10 @@ struct TransferOptions {
     batch_mib: u64,
     #[arg(long)]
     detach: bool,
+    /// Run preflight against the real source and destination and print the result without
+    /// moving any data or creating a job.
+    #[arg(long)]
+    dry_run: bool,
 }
 
 #[derive(Debug, Args)]
@@ -606,6 +610,10 @@ async fn handle_copy(
     spec.memory_budget_bytes = options.memory_mib.saturating_mul(1024 * 1024);
     spec.batch_target_bytes = options.batch_mib.saturating_mul(1024 * 1024);
     spec.validate()?;
+    if options.dry_run {
+        let response = client.request(Operation::JobPreview(spec)).await?;
+        return print_response(response, json);
+    }
     let response = client.request(Operation::JobSubmit(spec)).await?;
     let id = match &response {
         Response::Job(job) => job.spec.id,
@@ -833,6 +841,25 @@ fn print_response(response: Response, json: bool) -> anyhow::Result<()> {
             }
         }
         Response::Event(progress) => render_progress(&progress, false)?,
+        Response::Preview(preview) => {
+            for column in &preview.columns {
+                println!(
+                    "{}\t{} -> {}\t{}",
+                    column.name,
+                    column.source_type,
+                    column.output_type,
+                    if column.nullable { "null" } else { "not null" }
+                );
+            }
+            for warning in &preview.report.warnings {
+                println!("warning: {warning}");
+            }
+            if let Some(error) = &preview.publication_error {
+                println!("unsafe: {error}");
+            } else {
+                println!("publication is safe for the requested write mode and consistency");
+            }
+        }
     }
     Ok(())
 }
