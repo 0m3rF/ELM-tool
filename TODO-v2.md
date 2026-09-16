@@ -161,10 +161,61 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
 ## 6. Release readiness
 
 - [ ] Pass formatting, Clippy with warnings denied, unit/integration tests on Windows/macOS/Linux.
-- [ ] Pass dependency vulnerability and license policy audits; review native dependency distribution obligations.
+  Windows: verified continuously throughout this alpha's development, including this session.
+  Linux: verified 2026-09-16 by locally reproducing `.github/workflows/rust.yml`'s `ubuntu-latest`
+  job exactly (same apt packages, same three commands) in a disposable `rust:1-bookworm`
+  container — not yet the same as a confirmed green run on GitHub's own runners, but a real
+  Linux toolchain and OS, not a simulation. `cargo fmt --all -- --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` passed clean; `cargo test --workspace
+  --all-targets` initially failed two elm-daemon IPC tests with a real, reproducible bug: the
+  Unix domain socket client (`crates/elm-daemon/src/transport.rs`) had no connection retry, so
+  connecting before the daemon finished `UnixListener::bind` failed immediately with ENOENT,
+  unlike the Windows named-pipe client two functions above it, which already retried exactly
+  this race for 1 second. Fixed to match; full suite then passed, including
+  `process_restart.rs`'s real-subprocess kill/restart test running on Linux via `SIGKILL`.
+  **Still unverified: macOS.** No Apple hardware or CI access in this session; this gate
+  remains open until it runs on real macOS, per this file's own evidence standard.
+- [x] Pass dependency vulnerability and license policy audits; review native dependency distribution obligations.
+  Found and fixed a real gap while auditing: `deny.toml`'s license allowlist did not include
+  `GPL-3.0-or-later` — this workspace's own declared license — so `cargo deny check licenses`
+  had been failing on every one of the project's seven crates, and the `dependency-policy` CI
+  job (`.github/workflows/rust.yml`, `EmbarkStudios/cargo-deny-action@v2`) had presumably been
+  red since it was introduced. Fixed by adding the workspace's own license plus two other
+  legitimately-encountered transitive licenses (`Apache-2.0 WITH LLVM-exception`, `CC0-1.0`);
+  marked all seven workspace crates `publish = false` (they are an internal application, not
+  published libraries) so `allow-wildcard-paths` correctly covers their path-only internal
+  dependencies; and reviewed the 7 "unmaintained" (not vulnerability) advisories that remained
+  after that — all transitive via Tauri or the Oracle driver crate, all with no safe upgrade
+  available — and recorded them in `deny.toml`'s `ignore` list with the reasoning and exact
+  dependency chain for each, rather than silently widening the whole category. Verified
+  2026-09-16: `cargo deny check` now exits 0 with `advisories ok, bans ok, licenses ok, sources
+  ok`. Native dependency distribution reviewed: `.github/workflows/release.yml` only installs
+  the open-source `unixodbc-dev`/`unixodbc` build-time headers (not a Cargo dependency, so
+  outside `cargo deny`'s scope); no proprietary client (Oracle Instant Client, Microsoft ODBC
+  Driver 18) is bundled, downloaded, or distributed by any release artifact, matching
+  `docs/connectors.md`'s existing "ELM does not bundle or download proprietary clients" claim.
 - [ ] Review documentation: supported mappings, prerequisites, performance presets, recovery, safety modes,
   production precautions, and explicit Oracle non-atomic replacement tradeoffs.
-- [ ] Audit clean-break cutover and remaining legacy assets/configuration references; no Python application shim.
+  Partial pass on 2026-09-16: cross-checked a sample of specific claims in `docs/connectors.md`
+  and `docs/operations.md` against the current source (SQL Server source/sink type lists,
+  resource-tuning byte constants, `validate_source_resume` coverage, Oracle non-atomic-swap
+  language) — all matched exactly. Found and fixed one real bug from this session's own
+  editing: a prose paragraph had been inserted in the middle of `docs/connectors.md`'s
+  connector table, splitting it into two broken markdown fragments. Not exhaustive — this did
+  not check every mapping table entry line-by-line, did not read `docs/architecture.md` or
+  `docs/correctness-contract.md` at all, and did not review production-precautions prose
+  specifically. Leaving unchecked rather than claiming a full pass on a partial sample.
+- [x] Audit clean-break cutover and remaining legacy assets/configuration references; no Python application shim.
+  Clean result (2026-09-16): the only tracked Python file anywhere in the repo is
+  `benchmarks/installed_elm_performance.py`, the intentional ELM 1.0.5 comparison script
+  documented in §2's own evidence — not an application shim. No `requirements.txt`,
+  `setup.py`, `pyproject.toml`, or other Python packaging artifact exists. No CI workflow,
+  the Tauri build config, or any doc references a Python runtime, pip, or virtualenv. No
+  legacy v1 config schema, migration shim, or orphaned v1-era asset was found; the desktop
+  app's icon set is Tauri's own generated output, not a leftover. Separately noted, not a
+  finding for this item: the repo also tracks `.augment/` (~200 files), unrelated
+  AI-assistant tooling configuration for the Augment editor — not Python, not part of the
+  product, but worth a human decision on whether it belongs in version control.
 - [ ] Collect all release evidence before calling v2 stable. Do not substitute small smoke tests for acceptance gates.
 
 ## Evidence locations

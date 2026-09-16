@@ -7,16 +7,16 @@
 | CSV | Streaming Arrow CSV reader | Recoverable chunks, sibling staged Arrow CSV writer | None | Implemented |
 | NDJSON | Streaming line reader | Recoverable chunks, staged line-delimited writer | None | Implemented |
 | Parquet | RecordBatch reader | Recoverable chunks, staged ArrowWriter | None | Implemented |
+| PostgreSQL | Binary COPY OUT | Per-batch binary COPY into marked staging; transactional publish | None | Implemented alpha subset |
+| MySQL | Prepared binary protocol, request-driven batches | In-memory `LOAD DATA LOCAL`, announced prepared fallback | InnoDB; LOCAL preferred | Implemented alpha subset |
+| SQL Server | Typed ODBC block fetch | Columnar atomic staging sink | Microsoft ODBC Driver 18 | Alpha source/sink enabled; Linux native fixtures pass; limited types |
+| Oracle | Byte-bounded native array reader | Batch DML staging | Oracle Instant Client | Experimental; atomic APPEND/new tables; existing REPLACE requires explicit non-atomic table swap |
 
 `RecoverableFileSink` writes each batch as its own staged chunk file, fsyncs it, then renames it
 into place, so a chunk that never finishes never reaches the destination. Live-tested against a
 genuine 4 MiB `tmpfs` (`tests/full-disk/`, `crates/elm-connectors/tests/full_disk.rs`): staging
 writes fail closed with a clean `ElmError::Io` when the filesystem is actually exhausted, and no
 partial destination file is ever produced. See `docs/operations.md`.
-| PostgreSQL | Binary COPY OUT | Per-batch binary COPY into marked staging; transactional publish | None | Implemented alpha subset |
-| MySQL | Prepared binary protocol, request-driven batches | In-memory `LOAD DATA LOCAL`, announced prepared fallback | InnoDB; LOCAL preferred | Implemented alpha subset |
-| SQL Server | Typed ODBC block fetch | Columnar atomic staging sink | Microsoft ODBC Driver 18 | Alpha source/sink enabled; Linux native fixtures pass; limited types |
-| Oracle | Byte-bounded native array reader | Batch DML staging | Oracle Instant Client | Experimental; atomic APPEND/new tables; existing REPLACE requires explicit non-atomic table swap |
 
 The alpha daemon executes PostgreSQL-to-file, file-to-PostgreSQL, and PostgreSQL-to-PostgreSQL jobs.
 It performs a live keychain-backed connection diagnostic, discovers the Arrow schema before loading,

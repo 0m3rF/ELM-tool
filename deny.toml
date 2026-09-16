@@ -1,14 +1,28 @@
 [advisories]
 version = 2
 yanked = "deny"
+# "Unmaintained" (not a known vulnerability) findings reviewed 2026-09-16, all transitive and
+# with no safe upgrade available. Re-check when the pulling dependency updates.
+ignore = [
+  "RUSTSEC-2024-0436", # paste, via elm-connectors -> oracle (rust-oracle) 0.6.3
+  "RUSTSEC-2024-0370", # proc-macro-error, via elm-desktop -> tauri's Linux GTK bindings
+  "RUSTSEC-2025-0081", # unic-char-property, via elm-desktop -> tauri -> urlpattern
+  "RUSTSEC-2025-0075", # unic-char-range, via elm-desktop -> tauri -> urlpattern
+  "RUSTSEC-2025-0080", # unic-common, via elm-desktop -> tauri -> urlpattern
+  "RUSTSEC-2025-0100", # unic-ucd-ident, via elm-desktop -> tauri -> urlpattern
+  "RUSTSEC-2025-0098", # unic-ucd-version, via elm-desktop -> tauri -> urlpattern
+]
 
 [licenses]
 version = 2
 confidence-threshold = 0.8
 allow = [
   "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception", # target-lexicon, via elm-desktop's Linux GTK bindings
   "BSD-2-Clause",
   "BSD-3-Clause",
+  "CC0-1.0",                        # tiny-keccak, via elm-connectors -> ahash -> arrow-array
+  "GPL-3.0-or-later",                # this workspace's own declared license
   "ISC",
   "MIT",
   "MPL-2.0",
@@ -19,8 +33,11 @@ allow = [
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Internal workspace crates reference each other by path with no version; a path dependency
+# always resolves to this exact checkout, so it carries none of the "accepts any future
+# registry release" risk `wildcards = "deny"` exists to catch.
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-

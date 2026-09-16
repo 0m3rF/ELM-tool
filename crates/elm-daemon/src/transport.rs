@@ -41,8 +41,33 @@ pub async fn connect(paths: &RuntimePaths) -> Result<BoxedIo> {
 
 #[cfg(unix)]
 pub async fn connect(paths: &RuntimePaths) -> Result<BoxedIo> {
-    let stream = tokio::net::UnixStream::connect(paths.endpoint()).await?;
-    Ok(Box::new(stream))
+    // Mirrors the Windows named-pipe client below: a daemon that has just been spawned may not
+    // have reached `UnixListener::bind` yet, which fails a first connection attempt with ENOENT
+    // (socket file absent) or ECONNREFUSED (file present from a prior run, not yet re-bound).
+    let mut last_error = None;
+    for _ in 0..40 {
+        match tokio::net::UnixStream::connect(paths.endpoint()).await {
+            Ok(stream) => return Ok(Box::new(stream)),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                ) =>
+            {
+                last_error = Some(error);
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err(last_error
+        .unwrap_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "unix socket did not become ready",
+            )
+        })
+        .into())
 }
 
 #[cfg(windows)]
