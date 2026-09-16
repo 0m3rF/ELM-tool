@@ -10,6 +10,33 @@ prevent duplicates.
 State is stored in the OS per-user local data directory as `elm-v2.sqlite3`. `daemon.token` is an
 authentication secret, not a portable configuration file. Do not copy either file between users.
 
+## Same-table copies
+
+Live acceptance tests verify fresh staged jobs that read and write the same base table
+on PostgreSQL, MySQL, SQL Server, and Oracle. REPLACE publishes the selected rows, including
+an empty selection; APPEND doubles the original rows exactly; FAIL preserves the existing
+table and returns a conflict. Separate-connection readback at staging checkpoints verifies
+that the target still contains its original values before publication.
+
+The tests cover direct table selection, qualified names, SQL table aliases, and separate
+environment records pointing to the same database. `elm_connectors::physical_identity::resolve`
+additionally unwinds one level of view or synonym indirection and compares a server-native
+fingerprint, so a source and destination reached through a view/synonym or a different
+configured hostname for the same physical server are also recognized; this is a best-effort
+warning surfaced on the job, not a blocking check, since staged publication is already safe
+independent of whether source and destination are the same physical table. See
+`docs/connectors.md`. Concurrent writers remain outside this acceptance evidence.
+
+Interrupted same-table APPEND and REPLACE are accepted for unkeyed database sources. Live tests
+inject failure after a staging batch commits but before its checkpoint is stored. The target
+remains unchanged; retry with the same job identity restarts the source from row zero, reconciles
+the private staging data, and publishes once without duplicate rows. This verifies the engine and
+connector recovery boundary, not forced daemon-process termination.
+
+Oracle existing-table REPLACE requires explicit `table-swap` consistency and remains
+**non-atomic**, including when the source and target are the same table. Connector type
+restrictions and dependency restrictions still apply.
+
 ## Interrupted jobs
 
 After an unclean stop, an active job becomes `interrupted`. Inspect its last event and checkpoint:
@@ -60,6 +87,34 @@ directory contains an unrecognized entry, a manifest differs, or a PostgreSQL ta
 job comment, deletion fails and leaves the resource untouched for manual inspection. Connection
 environments referenced by job history cannot be removed; delete the jobs first so keychain-backed
 cleanup remains possible.
+
+## Fault injection coverage
+
+Live-tested for all four databases: privilege failures (staging fails closed with
+`PermissionDenied`), and duplicate keys / publication failure (a constraint violation fails the
+transfer and leaves the target unchanged — PostgreSQL rejects it while staging, since its
+staging table inherits the target's constraints; the other three reject it at publish).
+Live-tested for PostgreSQL, MySQL, and SQL Server: cancellation mid-transfer, via a real
+`TransferEngine` run cancelled partway through a multi-batch transfer. Oracle already had a
+deterministic connector-level cancellation unit test covering both cancellation windows.
+Live-tested for PostgreSQL only, as a representative case rather than repeated per database:
+connection loss (the database container is forcibly restarted mid-transfer; the job reports a
+clean connection failure within a bounded timeout) and a structurally malformed source row (a
+CSV row with the wrong field count fails closed, at open or during the transfer, without a
+partial target).
+
+Full disk and daemon process termination/restart are now covered too, each by a test that
+exercises the real failure mode rather than a simulated one. `crates/elm-connectors/tests/full_disk.rs`
+runs inside a disposable Docker fixture (`tests/full-disk/`) that mounts a genuine 4 MiB `tmpfs`
+at the staging path, writes chunks until the filesystem is actually exhausted, and confirms the
+failure surfaces as a clean `ElmError::Io` with no partial destination file.
+`crates/elm-daemon/tests/process_restart.rs` spawns the real `elm-daemon` binary as an OS
+subprocess (not the in-process `tokio::spawn(runtime.serve())` used by the interrupted-job
+recovery tests above), submits a transfer, waits for a checkpoint to actually commit, kills the
+process uncleanly (`TerminateProcess`/`SIGKILL`, no `DaemonStop`), starts a second daemon process
+against the same data directory, and confirms `DaemonRuntime::open`'s
+`mark_active_jobs_interrupted()` reconciliation marks the job `Interrupted` before resuming it
+over real IPC to a successful, non-duplicated completion.
 
 ## Resource tuning
 

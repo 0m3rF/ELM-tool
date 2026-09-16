@@ -31,8 +31,25 @@ jobs:
           echo "ELM_MATRIX_PASSWORD=$fixture_password" >> "$GITHUB_ENV"
       - name: Start isolated databases
         run: docker compose -p elm-cross-acceptance -f tests/cross-database/compose.yml up -d --wait --wait-timeout 180
-      - name: Verify both transfer directions
+      - name: Verify PostgreSQL and MySQL pairs and same-table copies
         run: cargo test -p elm-connectors --features postgresql,mysql --test cross_database -- --ignored --test-threads=1
       - name: Remove disposable fixtures
         if: always()
         run: docker compose -p elm-cross-acceptance -f tests/cross-database/compose.yml down --volumes
+
+  native-matrix:
+    # Establish remote evidence manually before making this heavier gate mandatory.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify all pairs and same-table copies with native drivers
+        shell: pwsh
+        run: ./tests/cross-database/run-native.ps1
+      - name: Remove fixtures after interruption
+        if: always()
+        shell: bash
+        env:
+          ELM_MATRIX_PASSWORD: cleanup-placeholder
+        run: docker compose -p elm-cross-native -f tests/cross-database/compose.yml -f tests/cross-database/native.yml down --volumes

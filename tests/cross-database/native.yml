@@ -1,0 +1,69 @@
+# Add to compose.yml for all 16 pairs. Native clients remain inside the test runner.
+services:
+  postgres:
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "elm_matrix"]
+      start_period: 180s
+      retries: 60
+  mysql:
+    healthcheck:
+      start_period: 180s
+      retries: 60
+  oracle:
+    image: gvenzl/oracle-xe:21-slim
+    environment:
+      ORACLE_PASSWORD: ${ELM_MATRIX_PASSWORD:?Set a disposable test password}
+      APP_USER: elm_matrix
+      APP_USER_PASSWORD: ${ELM_MATRIX_PASSWORD:?Set a disposable test password}
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+    tmpfs:
+      - /opt/oracle/diag:uid=54321,gid=54321,mode=0755,size=256m
+      - /opt/oracle/audit:uid=54321,gid=54321,mode=0755,size=64m
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 30s
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${ELM_MATRIX_PASSWORD:?Set a disposable test password}
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "SQLCMDPASSWORD=\"$$MSSQL_SA_PASSWORD\" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -Q 'SELECT 1' > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 180s
+  tests:
+    build:
+      context: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      oracle:
+        condition: service_healthy
+      sqlserver:
+        condition: service_healthy
+    environment:
+      ELM_MATRIX_CONTAINER: "1"
+      ELM_MATRIX_PASSWORD: ${ELM_MATRIX_PASSWORD:?Set a disposable test password}
+      CARGO_BUILD_JOBS: "4"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    volumes:
+      - ../..:/workspace:ro
+      - native-build:/build
+      - native-registry:/usr/local/cargo/registry
+volumes:
+  oracle-data:
+  sqlserver-data:
+  native-build:
+  native-registry:

@@ -171,6 +171,13 @@ fn execute(connection: &Connection, sql: &str) -> Result<()> {
     Ok(())
 }
 fn native_statement_error(error: oracle::Error) -> ElmError {
+    // ORA-01031 is Oracle's specific "insufficient privileges" code; report it distinctly so a
+    // caller can tell a privilege failure from a transient connection problem.
+    if error.oci_code() == Some(1031) {
+        return ElmError::PermissionDenied(
+            "Oracle account lacks the privilege required for this staging operation".into(),
+        );
+    }
     // Never expose native message text: it may contain SQL or row values.
     let category = if let Some(code) = error.oci_code() {
         format!("ORA-{code:05}")

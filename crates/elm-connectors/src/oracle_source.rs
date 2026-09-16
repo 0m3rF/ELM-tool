@@ -514,6 +514,154 @@ fn decimal_coefficient(text: &str, precision: u8, scale: i8) -> Result<i128> {
     Ok(if negative { -value } else { value })
 }
 
+pub(crate) async fn resolve_physical_identity(
+    environment: &Environment,
+    password: &str,
+    relation: &elm_core::Relation,
+) -> Result<Option<crate::physical_identity::PhysicalIdentity>> {
+    if relation.catalog.is_some() {
+        return Ok(None);
+    }
+    let descriptor = oracle_connect_descriptor(environment)?;
+    let timeout = std::time::Duration::from_millis(environment.oracle_call_timeout_ms()?);
+    let username = environment.username.clone();
+    let password = SecretString::from(password.to_owned());
+    let explicit_schema = relation
+        .schema
+        .as_ref()
+        .map(|value| value.as_str().to_owned());
+    let name = relation.name.as_str().to_owned();
+    let database = environment.database.clone();
+    tokio::task::spawn_blocking(move || {
+        resolve_oracle_identity_blocking(
+            &username,
+            &password,
+            &descriptor,
+            timeout,
+            explicit_schema.as_deref(),
+            &name,
+            &database,
+        )
+    })
+    .await
+    .map_err(|_| ElmError::Internal("Oracle physical-identity worker stopped".into()))?
+}
+
+fn resolve_oracle_identity_blocking(
+    username: &str,
+    password: &SecretString,
+    descriptor: &str,
+    timeout: std::time::Duration,
+    explicit_schema: Option<&str>,
+    name: &str,
+    database: &str,
+) -> Result<Option<crate::physical_identity::PhysicalIdentity>> {
+    oracle::Version::client().map_err(|_| {
+        ElmError::Unsupported(
+            "Oracle Instant Client could not be loaded; install Basic for this architecture and configure the native library loader".into(),
+        )
+    })?;
+    let connection = oracle::Connection::connect(username, password.expose_secret(), descriptor)
+        .map_err(|_| oracle_identity_error())?;
+    connection
+        .set_call_timeout(Some(timeout))
+        .map_err(|_| oracle_identity_error())?;
+
+    let connected_user: String = connection
+        .query_row_as("SELECT USER FROM dual", &[])
+        .map_err(|_| oracle_identity_error())?;
+    let owner = explicit_schema.map_or_else(|| connected_user.clone(), str::to_owned);
+
+    let table_count: i64 = connection
+        .query_row_as(
+            "SELECT COUNT(*) FROM all_tables WHERE owner = :1 AND table_name = :2",
+            &[&owner, &name],
+        )
+        .map_err(|_| oracle_identity_error())?;
+    let (base_schema, base_name) = if table_count == 1 {
+        (owner.clone(), name.to_owned())
+    } else {
+        let mut synonym = oracle_synonym_base(&connection, &owner, name)?;
+        if synonym.is_none() && explicit_schema.is_none() {
+            synonym = oracle_synonym_base(&connection, "PUBLIC", name)?;
+        }
+        if let Some((base_owner, base_name, db_link)) = synonym {
+            if db_link.is_some() {
+                return Ok(None);
+            }
+            (base_owner, base_name)
+        } else {
+            let dependents = oracle_view_dependents(&connection, &owner, name)?;
+            let [only] = dependents.as_slice() else {
+                return Ok(None);
+            };
+            only.clone()
+        }
+    };
+
+    let db_unique_name: String = connection
+        .query_row_as(
+            "SELECT SYS_CONTEXT('USERENV','DB_UNIQUE_NAME') FROM dual",
+            &[],
+        )
+        .map_err(|_| oracle_identity_error())?;
+    let instance_name: String = connection
+        .query_row_as(
+            "SELECT SYS_CONTEXT('USERENV','INSTANCE_NAME') FROM dual",
+            &[],
+        )
+        .map_err(|_| oracle_identity_error())?;
+
+    Ok(Some(crate::physical_identity::PhysicalIdentity {
+        server_fingerprint: format!("oracle:{db_unique_name}:{instance_name}"),
+        database: database.to_owned(),
+        base_schema: Some(base_schema),
+        base_relation: base_name,
+    }))
+}
+
+fn oracle_synonym_base(
+    connection: &oracle::Connection,
+    owner: &str,
+    name: &str,
+) -> Result<Option<(String, String, Option<String>)>> {
+    match connection.query_row_as::<(String, String, Option<String>)>(
+        "SELECT table_owner, table_name, db_link FROM all_synonyms WHERE owner = :1 AND synonym_name = :2",
+        &[&owner, &name],
+    ) {
+        Ok(row) => Ok(Some(row)),
+        Err(error) if error.kind() == oracle::ErrorKind::NoDataFound => Ok(None),
+        Err(_error) => Err(oracle_identity_error()),
+    }
+}
+
+fn oracle_view_dependents(
+    connection: &oracle::Connection,
+    owner: &str,
+    name: &str,
+) -> Result<Vec<(String, String)>> {
+    let rows = connection
+        .query_as::<(String, String)>(
+            "SELECT DISTINCT referenced_owner, referenced_name
+             FROM all_dependencies
+             WHERE owner = :1 AND name = :2 AND type = 'VIEW' AND referenced_type = 'TABLE'",
+            &[&owner, &name],
+        )
+        .map_err(|_| oracle_identity_error())?;
+    let mut dependents = Vec::new();
+    for row in rows {
+        dependents.push(row.map_err(|_| oracle_identity_error())?);
+    }
+    Ok(dependents)
+}
+
+fn oracle_identity_error() -> ElmError {
+    ElmError::Connection {
+        message: "Oracle physical-identity query failed".into(),
+        retryable: false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

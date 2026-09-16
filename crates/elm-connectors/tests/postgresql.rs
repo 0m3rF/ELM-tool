@@ -603,3 +603,976 @@ async fn keyset_resume_uses_parameterized_bounds_and_excludes_newer_rows() {
     drop(client);
     connection_task.abort();
 }
+
+#[tokio::test]
+#[ignore = "requires a PostgreSQL test instance"]
+async fn physical_identity_resolves_through_a_view_an_alternate_address_and_rejects_unrelated_tables()
+ {
+    let environment = environment();
+    let password = password();
+    let mut configuration = tokio_postgres::Config::new();
+    configuration
+        .host(&environment.host)
+        .port(environment.port)
+        .dbname(&environment.database)
+        .user(&environment.username)
+        .password(&password);
+    let (client, connection) = configuration
+        .connect(NoTls)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let connection_task = tokio::spawn(async move {
+        let _result = connection.await;
+    });
+    client
+        .batch_execute(
+            "DROP VIEW IF EXISTS public.elm_pg_identity_view;
+             DROP TABLE IF EXISTS public.elm_pg_identity_base;
+             DROP TABLE IF EXISTS public.elm_pg_identity_other;
+             CREATE TABLE public.elm_pg_identity_base (id BIGINT);
+             CREATE TABLE public.elm_pg_identity_other (id BIGINT);
+             CREATE VIEW public.elm_pg_identity_view AS SELECT * FROM public.elm_pg_identity_base;",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let base = elm_connectors::physical_identity::resolve(
+        &environment,
+        &password,
+        &relation("elm_pg_identity_base"),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"))
+    .unwrap_or_else(|| panic!("expected a resolvable base table identity"));
+    let via_view = elm_connectors::physical_identity::resolve(
+        &environment,
+        &password,
+        &relation("elm_pg_identity_view"),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"))
+    .unwrap_or_else(|| panic!("expected a resolvable view identity"));
+    let other = elm_connectors::physical_identity::resolve(
+        &environment,
+        &password,
+        &relation("elm_pg_identity_other"),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"))
+    .unwrap_or_else(|| panic!("expected a resolvable unrelated table identity"));
+    let missing = elm_connectors::physical_identity::resolve(
+        &environment,
+        &password,
+        &relation("elm_pg_identity_missing"),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+
+    // A second environment record reaching the same physical server through a different
+    // configured hostname must resolve to the same fingerprint, not a different one.
+    let mut aliased_environment = environment.clone();
+    aliased_environment.host = "localhost".into();
+    let via_alternate_address = elm_connectors::physical_identity::resolve(
+        &aliased_environment,
+        &password,
+        &relation("elm_pg_identity_base"),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"))
+    .unwrap_or_else(|| panic!("expected a resolvable identity through the alternate host"));
+
+    assert!(base.same_physical_table(&via_view));
+    assert!(base.same_physical_table(&via_alternate_address));
+    assert!(!base.same_physical_table(&other));
+    assert!(missing.is_none());
+
+    client
+        .batch_execute(
+            "DROP VIEW public.elm_pg_identity_view;
+             DROP TABLE public.elm_pg_identity_base;
+             DROP TABLE public.elm_pg_identity_other;",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection_task.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires a PostgreSQL test instance"]
+async fn sink_preflight_rejects_a_role_without_create_privilege() {
+    let environment = environment();
+    let password = password();
+    let mut configuration = tokio_postgres::Config::new();
+    configuration
+        .host(&environment.host)
+        .port(environment.port)
+        .dbname(&environment.database)
+        .user(&environment.username)
+        .password(&password);
+    let (client, connection) = configuration
+        .connect(NoTls)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let connection_task = tokio::spawn(async move {
+        let _result = connection.await;
+    });
+    let restricted_password = "elm-restricted-only";
+    let _ = client
+        .batch_execute("DROP OWNED BY elm_restricted_role")
+        .await;
+    client
+        .batch_execute("DROP ROLE IF EXISTS elm_restricted_role")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    client
+        .batch_execute(&format!(
+            "CREATE ROLE elm_restricted_role LOGIN PASSWORD '{restricted_password}'"
+        ))
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    client
+        .batch_execute("REVOKE CREATE ON SCHEMA public FROM elm_restricted_role")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    client
+        .batch_execute("GRANT USAGE ON SCHEMA public TO elm_restricted_role")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let mut restricted_environment = environment.clone();
+    restricted_environment.username = "elm_restricted_role".into();
+    let schema = std::sync::Arc::new(arrow_schema::Schema::new(vec![arrow_schema::Field::new(
+        "id",
+        arrow_schema::DataType::Int64,
+        false,
+    )]));
+    let job_id = JobId::new();
+    let mut sink = PostgresSink::connect(
+        &restricted_environment,
+        restricted_password,
+        relation("elm_pg_privilege_target"),
+        job_id,
+        None,
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+    let result = sink
+        .preflight(schema, WriteMode::Fail, ConsistencyMode::Atomic)
+        .await;
+    assert!(matches!(result, Err(ElmError::PermissionDenied(_))));
+    drop(sink);
+
+    client
+        .batch_execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+             WHERE usename = 'elm_restricted_role'",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    client
+        .batch_execute("DROP OWNED BY elm_restricted_role")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    client
+        .batch_execute("DROP ROLE elm_restricted_role")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection_task.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires a PostgreSQL test instance"]
+async fn engine_round_trips_through_parquet_with_reserved_identifiers_and_canonical_types() {
+    use arrow_array::Array;
+    use elm_core::{FileFormat, JobSpec, SinkSpec, SourceSpec};
+    use elm_engine::{NoopObserver, TransferEngine};
+    use tokio_util::sync::CancellationToken;
+
+    let environment = environment();
+    let password = password();
+    let mut configuration = tokio_postgres::Config::new();
+    configuration
+        .host(&environment.host)
+        .port(environment.port)
+        .dbname(&environment.database)
+        .user(&environment.username)
+        .password(&password);
+    let (client, connection) = configuration
+        .connect(NoTls)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let connection_task = tokio::spawn(async move {
+        let _result = connection.await;
+    });
+    client
+        .batch_execute(
+            "DROP TABLE IF EXISTS public.elm_pg_file_source;
+             DROP TABLE IF EXISTS public.elm_pg_file_target;
+             CREATE TABLE public.elm_pg_file_source (
+                 \"select\" BIGINT,
+                 label TEXT,
+                 amount NUMERIC(18,4),
+                 payload BYTEA,
+                 occurred_at TIMESTAMPTZ
+             );
+             INSERT INTO public.elm_pg_file_source VALUES
+                 (1, 'İstanbul 🌍', -12345.6700, decode('0001ff', 'hex'), TIMESTAMPTZ '2024-03-01 10:20:30+03'),
+                 (2, NULL, NULL, NULL, NULL);",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+    let path = directory.path().join("export.parquet");
+    let stage = directory.path().join("stage");
+
+    let selection = DatabaseSelection::Table {
+        relation: relation("elm_pg_file_source"),
+    };
+    let source = PostgresSource::connect(&environment, &password, &selection)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let export_spec = JobSpec::new(
+        SourceSpec::Database {
+            environment_id: environment.id,
+            selection,
+            resume_key: Vec::new(),
+        },
+        SinkSpec::File {
+            path: path.clone(),
+            format: FileFormat::Parquet,
+        },
+    );
+    let export_sink =
+        elm_connectors::RecoverableFileSink::new(&path, FileFormat::Parquet, &stage, None)
+            .unwrap_or_else(|error| panic!("{error}"));
+    TransferEngine::new(
+        export_spec,
+        CancellationToken::new(),
+        std::sync::Arc::new(NoopObserver),
+    )
+    .run(Box::new(source), Box::new(export_sink))
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+
+    let target = relation("elm_pg_file_target");
+    let file_source = elm_connectors::FileSource::open(&path, FileFormat::Parquet)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let job_id = JobId::new();
+    let import_sink = PostgresSink::connect(&environment, &password, target.clone(), job_id, None)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let import_spec = JobSpec::new(
+        SourceSpec::File {
+            path: path.clone(),
+            format: FileFormat::Parquet,
+        },
+        SinkSpec::Database {
+            environment_id: environment.id,
+            relation: target.clone(),
+        },
+    );
+    TransferEngine::new(
+        import_spec,
+        CancellationToken::new(),
+        std::sync::Arc::new(NoopObserver),
+    )
+    .run(Box::new(file_source), Box::new(import_sink))
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+
+    let mut readback = PostgresSource::connect(
+        &environment,
+        &password,
+        &DatabaseSelection::Table {
+            relation: target.clone(),
+        },
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+    let batch = readback
+        .next_batch(8192)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+        .unwrap_or_else(|| panic!("expected reimported rows"));
+    assert_eq!(batch.num_rows(), 2);
+    let ids = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap_or_else(|| panic!("expected select id"));
+    let labels = batch
+        .column(1)
+        .as_any()
+        .downcast_ref::<arrow_array::StringArray>()
+        .unwrap_or_else(|| panic!("expected label"));
+    let amounts = batch
+        .column(2)
+        .as_any()
+        .downcast_ref::<arrow_array::Decimal128Array>()
+        .unwrap_or_else(|| panic!("expected amount"));
+    let payloads = batch
+        .column(3)
+        .as_any()
+        .downcast_ref::<arrow_array::BinaryArray>()
+        .unwrap_or_else(|| panic!("expected payload"));
+    for row in 0..2 {
+        match ids.value(row) {
+            1 => {
+                assert_eq!(labels.value(row), "İstanbul 🌍");
+                assert_eq!(amounts.value(row), -123_456_700);
+                assert_eq!(payloads.value(row), [0x00, 0x01, 0xff]);
+            }
+            2 => {
+                assert!(labels.is_null(row));
+                assert!(amounts.is_null(row));
+                assert!(payloads.is_null(row));
+            }
+            other => panic!("unexpected reimported id {other}"),
+        }
+    }
+
+    client
+        .batch_execute(
+            "DROP TABLE public.elm_pg_file_source;
+             DROP TABLE public.elm_pg_file_target;",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection_task.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires a PostgreSQL test instance"]
+async fn engine_round_trips_csv_and_ndjson_including_empty_results() {
+    use elm_core::{FileFormat, JobSpec, SinkSpec, SourceSpec};
+    use elm_engine::{NoopObserver, TransferEngine};
+    use tokio_util::sync::CancellationToken;
+
+    let environment = environment();
+    let password = password();
+    let mut configuration = tokio_postgres::Config::new();
+    configuration
+        .host(&environment.host)
+        .port(environment.port)
+        .dbname(&environment.database)
+        .user(&environment.username)
+        .password(&password);
+    let (client, connection) = configuration
+        .connect(NoTls)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let connection_task = tokio::spawn(async move {
+        let _result = connection.await;
+    });
+    client
+        .batch_execute(
+            "DROP TABLE IF EXISTS public.elm_pg_text_source;
+             CREATE TABLE public.elm_pg_text_source (\"select\" BIGINT, label TEXT, event_day DATE);
+             INSERT INTO public.elm_pg_text_source VALUES
+                 (1, 'İstanbul 🌍', DATE '2024-02-29'),
+                 (2, NULL, NULL);",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    for format in [FileFormat::Csv, FileFormat::Ndjson] {
+        for empty in [false, true] {
+            let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+            let path = directory.path().join("export");
+            let stage = directory.path().join("stage");
+            let sql = if empty {
+                "SELECT * FROM public.elm_pg_text_source WHERE 1=0"
+            } else {
+                "SELECT * FROM public.elm_pg_text_source ORDER BY \"select\""
+            };
+            let selection = DatabaseSelection::Query { sql: sql.into() };
+            let source = PostgresSource::connect(&environment, &password, &selection)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            let export_spec = JobSpec::new(
+                SourceSpec::Database {
+                    environment_id: environment.id,
+                    selection,
+                    resume_key: Vec::new(),
+                },
+                SinkSpec::File {
+                    path: path.clone(),
+                    format,
+                },
+            );
+            let export_sink = elm_connectors::RecoverableFileSink::new(&path, format, &stage, None)
+                .unwrap_or_else(|error| panic!("{error}"));
+            TransferEngine::new(
+                export_spec,
+                CancellationToken::new(),
+                std::sync::Arc::new(NoopObserver),
+            )
+            .run(Box::new(source), Box::new(export_sink))
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+
+            if empty {
+                match format {
+                    FileFormat::Csv => assert_eq!(
+                        std::fs::read_to_string(&path)
+                            .unwrap_or_else(|error| panic!("{error}"))
+                            .trim(),
+                        "select,label,event_day"
+                    ),
+                    FileFormat::Ndjson => assert!(
+                        std::fs::read(&path)
+                            .unwrap_or_else(|error| panic!("{error}"))
+                            .is_empty()
+                    ),
+                    FileFormat::Parquet => unreachable!(),
+                }
+                continue;
+            }
+            let content = std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{error}"));
+            assert!(content.contains("İstanbul 🌍"));
+            assert!(content.contains("2024-02-29"));
+
+            let target = relation("elm_pg_text_target");
+            client
+                .batch_execute("DROP TABLE IF EXISTS public.elm_pg_text_target")
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            let file_source = elm_connectors::FileSource::open(&path, format)
+                .unwrap_or_else(|error| panic!("{error}"));
+            let job_id = JobId::new();
+            let import_sink =
+                PostgresSink::connect(&environment, &password, target.clone(), job_id, None)
+                    .await
+                    .unwrap_or_else(|error| panic!("{error}"));
+            let import_spec = JobSpec::new(
+                SourceSpec::File {
+                    path: path.clone(),
+                    format,
+                },
+                SinkSpec::Database {
+                    environment_id: environment.id,
+                    relation: target.clone(),
+                },
+            );
+            TransferEngine::new(
+                import_spec,
+                CancellationToken::new(),
+                std::sync::Arc::new(NoopObserver),
+            )
+            .run(Box::new(file_source), Box::new(import_sink))
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+            let mut readback = PostgresSource::connect(
+                &environment,
+                &password,
+                &DatabaseSelection::Table {
+                    relation: target.clone(),
+                },
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+            let batch = readback
+                .next_batch(8192)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"))
+                .unwrap_or_else(|| panic!("expected reimported rows"));
+            assert_eq!(batch.num_rows(), 2);
+            let labels = batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<arrow_array::StringArray>()
+                .unwrap_or_else(|| panic!("expected label"));
+            assert!((0..2).any(|row| !arrow_array::Array::is_null(labels, row)
+                && labels.value(row) == "İstanbul 🌍"));
+            client
+                .batch_execute("DROP TABLE public.elm_pg_text_target")
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+        }
+    }
+
+    client
+        .batch_execute("DROP TABLE public.elm_pg_text_source")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection_task.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires a PostgreSQL test instance"]
+async fn engine_rejects_an_explicit_lossy_conversion_of_an_unparseable_value() {
+    use elm_core::{ConversionRule, FileFormat, JobSpec, SinkSpec, SourceSpec};
+    use elm_engine::{NoopObserver, TransferEngine};
+    use tokio_util::sync::CancellationToken;
+
+    let environment = environment();
+    let password = password();
+    let mut configuration = tokio_postgres::Config::new();
+    configuration
+        .host(&environment.host)
+        .port(environment.port)
+        .dbname(&environment.database)
+        .user(&environment.username)
+        .password(&password);
+    let (client, connection) = configuration
+        .connect(NoTls)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let connection_task = tokio::spawn(async move {
+        let _result = connection.await;
+    });
+    client
+        .batch_execute("DROP TABLE IF EXISTS public.elm_pg_conversion_target")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+    let path = directory.path().join("bad.csv");
+    std::fs::write(&path, "\"select\"\n1\nnot-a-number\n")
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let target = relation("elm_pg_conversion_target");
+    let file_source = elm_connectors::FileSource::open(&path, FileFormat::Csv)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let job_id = JobId::new();
+    let sink = PostgresSink::connect(&environment, &password, target.clone(), job_id, None)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let mut spec = JobSpec::new(
+        SourceSpec::File {
+            path: path.clone(),
+            format: FileFormat::Csv,
+        },
+        SinkSpec::Database {
+            environment_id: environment.id,
+            relation: target.clone(),
+        },
+    );
+    spec.conversions.push(ConversionRule {
+        column: Identifier::new("select").unwrap_or_else(|error| panic!("{error}")),
+        target_type: "int64".into(),
+        allow_lossy: true,
+    });
+    let result = TransferEngine::new(
+        spec,
+        CancellationToken::new(),
+        std::sync::Arc::new(NoopObserver),
+    )
+    .run(Box::new(file_source), Box::new(sink))
+    .await;
+    assert!(matches!(result, Err(ElmError::TypeMapping(_))));
+
+    let exists: bool = client
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class WHERE relname = 'elm_pg_conversion_target')",
+            &[],
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+        .get(0);
+    assert!(
+        !exists,
+        "a failed conversion must not leave a partial target"
+    );
+
+    connection_task.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires a PostgreSQL test instance"]
+async fn duplicate_source_rows_fail_closed_and_preserve_the_target() {
+    let environment = environment();
+    let password = password();
+    let mut configuration = tokio_postgres::Config::new();
+    configuration
+        .host(&environment.host)
+        .port(environment.port)
+        .dbname(&environment.database)
+        .user(&environment.username)
+        .password(&password);
+    let (client, connection) = configuration
+        .connect(NoTls)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let connection_task = tokio::spawn(async move {
+        let _result = connection.await;
+    });
+    client
+        .batch_execute(
+            "DROP TABLE IF EXISTS public.elm_pg_conflict_target;
+             DROP TABLE IF EXISTS public.elm_pg_conflict_source;
+             CREATE TABLE public.elm_pg_conflict_target (id BIGINT NOT NULL PRIMARY KEY);
+             INSERT INTO public.elm_pg_conflict_target VALUES (99);
+             CREATE TABLE public.elm_pg_conflict_source (id BIGINT NOT NULL);
+             INSERT INTO public.elm_pg_conflict_source VALUES (1), (1);",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let mut source = PostgresSource::connect(
+        &environment,
+        &password,
+        &DatabaseSelection::Table {
+            relation: relation("elm_pg_conflict_source"),
+        },
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+    let schema = source
+        .schema()
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let job_id = JobId::new();
+    let target = relation("elm_pg_conflict_target");
+    let mut sink = PostgresSink::connect(&environment, &password, target.clone(), job_id, None)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    sink.preflight(schema, WriteMode::Append, ConsistencyMode::Atomic)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    sink.begin().await.unwrap_or_else(|error| panic!("{error}"));
+
+    let mut sequence = 0_u64;
+    let mut rows = 0_u64;
+    let mut staging_rejected = false;
+    while let Some(batch) = source
+        .next_batch(64)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+    {
+        match sink.write_batch(&batch).await {
+            Ok(()) => {
+                rows = rows.saturating_add(u64::try_from(batch.num_rows()).unwrap_or(u64::MAX));
+                sink.commit_checkpoint(&BatchCheckpoint {
+                    sequence,
+                    source_position: source
+                        .checkpoint()
+                        .await
+                        .unwrap_or_else(|error| panic!("{error}")),
+                    rows_committed: rows,
+                    bytes_committed: 0,
+                    source_fingerprint: None,
+                })
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+                sequence += 1;
+            }
+            Err(_) => {
+                staging_rejected = true;
+                break;
+            }
+        }
+    }
+    // PostgreSQL's staging table for APPEND inherits the target's constraints
+    // (`CREATE TABLE ... LIKE target INCLUDING ALL`), so a duplicate primary key is rejected
+    // while staging the batch, not at publish; either failure point must preserve the target.
+    if !staging_rejected {
+        assert!(sink.publish().await.is_err());
+    }
+
+    let rows: Vec<i64> = client
+        .query("SELECT id FROM public.elm_pg_conflict_target", &[])
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+        .iter()
+        .map(|row| row.get(0))
+        .collect();
+    assert_eq!(rows, vec![99]);
+
+    elm_connectors::cleanup_postgres_staging(&environment, &password, &target, job_id)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    client
+        .batch_execute(
+            "DROP TABLE public.elm_pg_conflict_source;
+             DROP TABLE public.elm_pg_conflict_target;",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection_task.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires a PostgreSQL test instance"]
+async fn engine_cancellation_mid_transfer_leaves_no_new_target() {
+    use elm_core::{JobSpec, SinkSpec, SourceSpec};
+    use elm_engine::{NoopObserver, TransferEngine};
+    use tokio_util::sync::CancellationToken;
+
+    let environment = environment();
+    let password = password();
+    let mut configuration = tokio_postgres::Config::new();
+    configuration
+        .host(&environment.host)
+        .port(environment.port)
+        .dbname(&environment.database)
+        .user(&environment.username)
+        .password(&password);
+    let (client, connection) = configuration
+        .connect(NoTls)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let connection_task = tokio::spawn(async move {
+        let _result = connection.await;
+    });
+    client
+        .batch_execute(
+            "DROP TABLE IF EXISTS public.elm_pg_cancel_source;
+             DROP TABLE IF EXISTS public.elm_pg_cancel_target;
+             CREATE TABLE public.elm_pg_cancel_source (id BIGINT NOT NULL, label TEXT);
+             INSERT INTO public.elm_pg_cancel_source
+                 SELECT generator, repeat('x', 2000)
+                 FROM generate_series(1, 50000) AS generator;",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let selection = DatabaseSelection::Table {
+        relation: relation("elm_pg_cancel_source"),
+    };
+    let source = PostgresSource::connect(&environment, &password, &selection)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let target = relation("elm_pg_cancel_target");
+    let job_id = JobId::new();
+    let sink = PostgresSink::connect(&environment, &password, target.clone(), job_id, None)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let mut spec = JobSpec::new(
+        SourceSpec::Database {
+            environment_id: environment.id,
+            selection,
+            resume_key: Vec::new(),
+        },
+        SinkSpec::Database {
+            environment_id: environment.id,
+            relation: target.clone(),
+        },
+    );
+    spec.batch_target_bytes = elm_core::MIN_BATCH_TARGET_BYTES;
+    let cancellation = CancellationToken::new();
+    let engine = TransferEngine::new(
+        spec,
+        cancellation.clone(),
+        std::sync::Arc::new(NoopObserver),
+    );
+    let handle = tokio::spawn(engine.run(Box::new(source), Box::new(sink)));
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    cancellation.cancel();
+    let result = handle.await.unwrap_or_else(|error| panic!("{error}"));
+    assert!(matches!(result, Err(ElmError::Cancelled)));
+
+    let exists: bool = client
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class WHERE relname = 'elm_pg_cancel_target')",
+            &[],
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+        .get(0);
+    assert!(!exists, "a cancelled transfer must not leave a new target");
+
+    elm_connectors::cleanup_postgres_staging(&environment, &password, &target, job_id)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    client
+        .batch_execute("DROP TABLE public.elm_pg_cancel_source")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection_task.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires a PostgreSQL test instance and Docker control over its container"]
+async fn engine_reports_a_clean_error_when_the_connection_is_severed_mid_transfer() {
+    use elm_core::{JobSpec, SinkSpec, SourceSpec};
+    use elm_engine::{NoopObserver, TransferEngine};
+    use tokio_util::sync::CancellationToken;
+
+    let container = std::env::var("ELM_TEST_POSTGRES_DOCKER_CONTAINER").unwrap_or_else(|_| {
+        panic!("set ELM_TEST_POSTGRES_DOCKER_CONTAINER to the disposable fixture container name")
+    });
+    let environment = environment();
+    let password = password();
+    let mut configuration = tokio_postgres::Config::new();
+    configuration
+        .host(&environment.host)
+        .port(environment.port)
+        .dbname(&environment.database)
+        .user(&environment.username)
+        .password(&password);
+    let (client, connection) = configuration
+        .connect(NoTls)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let connection_task = tokio::spawn(async move {
+        let _result = connection.await;
+    });
+    client
+        .batch_execute(
+            "DROP TABLE IF EXISTS public.elm_pg_severed_source;
+             DROP TABLE IF EXISTS public.elm_pg_severed_target;
+             CREATE TABLE public.elm_pg_severed_source (id BIGINT NOT NULL, label TEXT);
+             INSERT INTO public.elm_pg_severed_source
+                 SELECT generator, repeat('x', 4000)
+                 FROM generate_series(1, 200000) AS generator;",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let selection = DatabaseSelection::Table {
+        relation: relation("elm_pg_severed_source"),
+    };
+    let source = PostgresSource::connect(&environment, &password, &selection)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let target = relation("elm_pg_severed_target");
+    let job_id = JobId::new();
+    let sink = PostgresSink::connect(&environment, &password, target.clone(), job_id, None)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let mut spec = JobSpec::new(
+        SourceSpec::Database {
+            environment_id: environment.id,
+            selection,
+            resume_key: Vec::new(),
+        },
+        SinkSpec::Database {
+            environment_id: environment.id,
+            relation: target.clone(),
+        },
+    );
+    spec.batch_target_bytes = elm_core::MIN_BATCH_TARGET_BYTES;
+    let engine = TransferEngine::new(
+        spec,
+        CancellationToken::new(),
+        std::sync::Arc::new(NoopObserver),
+    );
+    let handle = tokio::spawn(engine.run(Box::new(source), Box::new(sink)));
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let restart = std::process::Command::new("docker")
+        .args(["restart", "--timeout", "0", &container])
+        .status()
+        .unwrap_or_else(|error| panic!("failed to invoke docker: {error}"));
+    assert!(restart.success(), "failed to restart the fixture container");
+
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), handle)
+        .await
+        .unwrap_or_else(|_| panic!("engine did not report the severed connection in time"))
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert!(
+        result.is_err(),
+        "a severed connection must surface as a job failure, not a silent success"
+    );
+    assert!(
+        !matches!(result, Err(ElmError::Cancelled)),
+        "the failure must be reported as a connection error, not spurious cancellation"
+    );
+    connection_task.abort();
+
+    // This test deliberately disrupts a shared fixture; block until it is genuinely healthy
+    // again so later tests in the same run do not see spurious connection failures.
+    for attempt in 0..60 {
+        if test_postgres_environment(&environment, &password)
+            .await
+            .is_ok()
+        {
+            return;
+        }
+        let _ = attempt;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    panic!("PostgreSQL fixture did not become healthy again after the restart");
+}
+
+#[tokio::test]
+#[ignore = "requires a PostgreSQL test instance"]
+async fn engine_rejects_a_malformed_row_without_leaving_a_partial_target() {
+    use elm_core::{FileFormat, JobSpec, SinkSpec, SourceSpec};
+    use elm_engine::{NoopObserver, TransferEngine};
+    use tokio_util::sync::CancellationToken;
+
+    let environment = environment();
+    let password = password();
+    let mut configuration = tokio_postgres::Config::new();
+    configuration
+        .host(&environment.host)
+        .port(environment.port)
+        .dbname(&environment.database)
+        .user(&environment.username)
+        .password(&password);
+    let (client, connection) = configuration
+        .connect(NoTls)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let connection_task = tokio::spawn(async move {
+        let _result = connection.await;
+    });
+    client
+        .batch_execute("DROP TABLE IF EXISTS public.elm_pg_malformed_target")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+    let path = directory.path().join("malformed.csv");
+    // The third row declares an extra field: this is a structurally malformed row, distinct
+    // from a value that merely fails an explicit type conversion.
+    std::fs::write(&path, "id,label\n1,first\n2,second\n3,third,extra\n")
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let target = relation("elm_pg_malformed_target");
+    let job_id = JobId::new();
+    let file_source = elm_connectors::FileSource::open(&path, FileFormat::Csv);
+    let malformed_at_open = file_source.is_err();
+    let (result, target_touched) = if let Ok(file_source) = file_source {
+        let sink = PostgresSink::connect(&environment, &password, target.clone(), job_id, None)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let spec = JobSpec::new(
+            SourceSpec::File {
+                path: path.clone(),
+                format: FileFormat::Csv,
+            },
+            SinkSpec::Database {
+                environment_id: environment.id,
+                relation: target.clone(),
+            },
+        );
+        let result = TransferEngine::new(
+            spec,
+            CancellationToken::new(),
+            std::sync::Arc::new(NoopObserver),
+        )
+        .run(Box::new(file_source), Box::new(sink))
+        .await;
+        (Some(result), true)
+    } else {
+        (None, false)
+    };
+
+    assert!(
+        malformed_at_open || matches!(result, Some(Err(_))),
+        "a structurally malformed row must fail closed, either at open or during the transfer"
+    );
+    if target_touched {
+        elm_connectors::cleanup_postgres_staging(&environment, &password, &target, job_id)
+            .await
+            .ok();
+    }
+    let exists: bool = client
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class WHERE relname = 'elm_pg_malformed_target')",
+            &[],
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+        .get(0);
+    assert!(
+        !exists,
+        "a malformed source must not leave a partial target"
+    );
+
+    connection_task.abort();
+}

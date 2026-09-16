@@ -979,3 +979,477 @@ async fn deleting_an_interrupted_swap_restores_the_original_without_publication(
         .unwrap_or_else(|error| panic!("{error}"));
     fixture_execute(&connection, &format!("DROP TABLE \"{}\"", target.name));
 }
+
+#[tokio::test]
+#[ignore = "requires Oracle Instant Client and an isolated Oracle database"]
+async fn physical_identity_resolves_through_a_view_a_synonym_and_rejects_unrelated_tables() {
+    let environment = environment();
+    let password = std::env::var("ELM_TEST_ORACLE_PASSWORD")
+        .unwrap_or_else(|_| panic!("set ELM_TEST_ORACLE_PASSWORD"));
+    let job = JobId::new();
+    let suffix = job.0.simple().to_string();
+    let base_name = format!("elm_id_base_{suffix}");
+    let other_name = format!("elm_id_other_{suffix}");
+    let view_name = format!("elm_id_view_{suffix}");
+    let synonym_name = format!("elm_id_syn_{suffix}");
+
+    let connection = native_connection(&environment, &password);
+    fixture_execute(
+        &connection,
+        &format!("CREATE TABLE {base_name} (id NUMBER(10,0))"),
+    );
+    fixture_execute(
+        &connection,
+        &format!("CREATE TABLE {other_name} (id NUMBER(10,0))"),
+    );
+    fixture_execute(
+        &connection,
+        &format!("CREATE VIEW {view_name} AS SELECT * FROM {base_name}"),
+    );
+    fixture_execute(
+        &connection,
+        &format!("CREATE SYNONYM {synonym_name} FOR {base_name}"),
+    );
+
+    // Unquoted DDL folds names to uppercase in Oracle''s catalog; match that when resolving.
+    let relation_named = |name: &str| Relation {
+        catalog: None,
+        schema: None,
+        name: Identifier::new(name.to_uppercase()).unwrap_or_else(|error| panic!("{error}")),
+    };
+
+    let base = elm_connectors::physical_identity::resolve(
+        &environment,
+        &password,
+        &relation_named(&base_name),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"))
+    .unwrap_or_else(|| panic!("expected a resolvable base table identity"));
+    let via_view = elm_connectors::physical_identity::resolve(
+        &environment,
+        &password,
+        &relation_named(&view_name),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"))
+    .unwrap_or_else(|| panic!("expected a resolvable view identity"));
+    let via_synonym = elm_connectors::physical_identity::resolve(
+        &environment,
+        &password,
+        &relation_named(&synonym_name),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"))
+    .unwrap_or_else(|| panic!("expected a resolvable synonym identity"));
+    let other = elm_connectors::physical_identity::resolve(
+        &environment,
+        &password,
+        &relation_named(&other_name),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"))
+    .unwrap_or_else(|| panic!("expected a resolvable unrelated table identity"));
+    let missing = elm_connectors::physical_identity::resolve(
+        &environment,
+        &password,
+        &relation_named("elm_id_missing_table"),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+
+    assert!(base.same_physical_table(&via_view));
+    assert!(base.same_physical_table(&via_synonym));
+    assert!(!base.same_physical_table(&other));
+    assert!(missing.is_none());
+
+    fixture_execute(&connection, &format!("DROP SYNONYM {synonym_name}"));
+    fixture_execute(&connection, &format!("DROP VIEW {view_name}"));
+    fixture_execute(&connection, &format!("DROP TABLE {base_name} PURGE"));
+    fixture_execute(&connection, &format!("DROP TABLE {other_name} PURGE"));
+}
+
+fn native_connection_as(
+    environment: &Environment,
+    username: &str,
+    password: &str,
+) -> oracle::Connection {
+    oracle::Connection::connect(
+        username,
+        password,
+        format!(
+            "//{}:{}/{}",
+            environment.host, environment.port, environment.database
+        ),
+    )
+    .unwrap_or_else(|_| panic!("isolated Oracle fixture connection failed"))
+}
+
+#[tokio::test]
+#[ignore = "requires Oracle Instant Client, an isolated Oracle database, and a SYSTEM-privileged setup account"]
+async fn sink_begin_rejects_a_user_without_create_table_privilege() {
+    use elm_core::{ConsistencyMode, DataSink, WriteMode};
+
+    let environment = environment();
+    let password = std::env::var("ELM_TEST_ORACLE_PASSWORD")
+        .unwrap_or_else(|_| panic!("set ELM_TEST_ORACLE_PASSWORD"));
+    let system = native_connection_as(&environment, "system", &password);
+    let restricted_password = "Elm-Restricted-Only-1";
+    let _ = system.execute("DROP USER elm_restricted CASCADE", &[]);
+    fixture_execute(
+        &system,
+        &format!("CREATE USER elm_restricted IDENTIFIED BY \"{restricted_password}\""),
+    );
+    fixture_execute(&system, "GRANT CREATE SESSION TO elm_restricted");
+
+    let mut restricted_environment = environment.clone();
+    restricted_environment.username = "elm_restricted".into();
+    let schema = std::sync::Arc::new(arrow_schema::Schema::new(vec![arrow_schema::Field::new(
+        "id",
+        arrow_schema::DataType::Decimal128(18, 0),
+        false,
+    )]));
+    let job_id = JobId::new();
+    let mut sink = OracleSink::connect(
+        &restricted_environment,
+        restricted_password,
+        fixture_target(job_id),
+        job_id,
+        None,
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+    sink.preflight(schema, WriteMode::Fail, ConsistencyMode::Atomic)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let result = sink.begin().await;
+    assert!(matches!(
+        result,
+        Err(elm_core::ElmError::PermissionDenied(_))
+    ));
+    drop(sink);
+
+    // The restricted user's native OCI connection may take a moment to fully close after
+    // drop(sink); retry the cleanup briefly instead of racing it.
+    for attempt in 0..20 {
+        match system.execute("DROP USER elm_restricted CASCADE", &[]) {
+            Ok(_) => break,
+            Err(_) if attempt < 19 => std::thread::sleep(std::time::Duration::from_millis(250)),
+            Err(error) => panic!("user cleanup failed: {error}"),
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires Oracle Instant Client and an isolated Oracle database"]
+async fn engine_round_trips_through_parquet_with_reserved_identifiers_and_canonical_types() {
+    use elm_engine::NoopObserver;
+
+    let environment = environment();
+    let password = std::env::var("ELM_TEST_ORACLE_PASSWORD")
+        .unwrap_or_else(|_| panic!("set ELM_TEST_ORACLE_PASSWORD"));
+    let sql = "SELECT CAST(1 AS NUMBER(18,0)) AS \"select\", CAST(N'İstanbul 🌍' AS NVARCHAR2(100)) AS label, CAST(-12345.6700 AS NUMBER(18,4)) AS amount, HEXTORAW('0001FF') AS payload, CAST(TIMESTAMP '2024-03-01 07:20:30.654321' AS TIMESTAMP(6)) AS occurred_at FROM dual UNION ALL SELECT CAST(2 AS NUMBER(18,0)), CAST(NULL AS NVARCHAR2(100)), CAST(NULL AS NUMBER(18,4)), CAST(NULL AS RAW(3)), CAST(NULL AS TIMESTAMP(6)) FROM dual";
+    let selection = DatabaseSelection::Query { sql: sql.into() };
+    let source = OracleSource::connect(&environment, &password, &selection)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+    let path = directory.path().join("export.parquet");
+    let stage = directory.path().join("stage");
+    let export_spec = JobSpec::new(
+        SourceSpec::Database {
+            environment_id: environment.id,
+            selection,
+            resume_key: Vec::new(),
+        },
+        SinkSpec::File {
+            path: path.clone(),
+            format: FileFormat::Parquet,
+        },
+    );
+    let export_sink =
+        elm_connectors::RecoverableFileSink::new(&path, FileFormat::Parquet, &stage, None)
+            .unwrap_or_else(|error| panic!("{error}"));
+    TransferEngine::new(
+        export_spec,
+        CancellationToken::new(),
+        Arc::new(NoopObserver),
+    )
+    .run(Box::new(source), Box::new(export_sink))
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+
+    let job_id = JobId::new();
+    let target = fixture_target(job_id);
+    let file_source = elm_connectors::FileSource::open(&path, FileFormat::Parquet)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let import_sink = OracleSink::connect(&environment, &password, target.clone(), job_id, None)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let import_spec = JobSpec::new(
+        SourceSpec::File {
+            path: path.clone(),
+            format: FileFormat::Parquet,
+        },
+        SinkSpec::Database {
+            environment_id: environment.id,
+            relation: target.clone(),
+        },
+    );
+    TransferEngine::new(
+        import_spec,
+        CancellationToken::new(),
+        Arc::new(NoopObserver),
+    )
+    .run(Box::new(file_source), Box::new(import_sink))
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+
+    let mut readback = OracleSource::connect(
+        &environment,
+        &password,
+        &DatabaseSelection::Table {
+            relation: target.clone(),
+        },
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+    let batch = readback
+        .next_batch(32 * 1024 * 1024)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+        .unwrap_or_else(|| panic!("expected reimported rows"));
+    assert_eq!(batch.num_rows(), 2);
+    let ids = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<Decimal128Array>()
+        .unwrap_or_else(|| panic!("expected select id"));
+    let labels = batch
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap_or_else(|| panic!("expected label"));
+    let amounts = batch
+        .column(2)
+        .as_any()
+        .downcast_ref::<Decimal128Array>()
+        .unwrap_or_else(|| panic!("expected amount"));
+    let payloads = batch
+        .column(3)
+        .as_any()
+        .downcast_ref::<BinaryArray>()
+        .unwrap_or_else(|| panic!("expected payload"));
+    for row in 0..2 {
+        match ids.value(row) {
+            1 => {
+                assert_eq!(labels.value(row), "İstanbul 🌍");
+                assert_eq!(amounts.value(row), -123_456_700);
+                assert_eq!(payloads.value(row), [0x00, 0x01, 0xff]);
+            }
+            2 => {
+                assert!(labels.is_null(row));
+                assert!(amounts.is_null(row));
+                assert!(payloads.is_null(row));
+            }
+            other => panic!("unexpected reimported id {other}"),
+        }
+    }
+
+    cleanup_oracle_staging(&environment, &password, target.clone(), job_id)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let connection = native_connection(&environment, &password);
+    fixture_execute(&connection, &format!("DROP TABLE \"{}\"", target.name));
+}
+
+#[tokio::test]
+#[ignore = "requires Oracle Instant Client and an isolated Oracle database"]
+async fn engine_round_trips_csv_and_ndjson_including_empty_results() {
+    use elm_engine::NoopObserver;
+
+    let environment = environment();
+    let password = std::env::var("ELM_TEST_ORACLE_PASSWORD")
+        .unwrap_or_else(|_| panic!("set ELM_TEST_ORACLE_PASSWORD"));
+
+    for format in [FileFormat::Csv, FileFormat::Ndjson] {
+        for empty in [false, true] {
+            let sql = if empty {
+                "SELECT CAST(1 AS NUMBER(18,0)) AS \"select\", CAST(N'İstanbul 🌍' AS NVARCHAR2(100)) AS \"label\" FROM dual WHERE 1 = 0"
+            } else {
+                "SELECT CAST(1 AS NUMBER(18,0)) AS \"select\", CAST(N'İstanbul 🌍' AS NVARCHAR2(100)) AS \"label\" FROM dual UNION ALL SELECT CAST(2 AS NUMBER(18,0)), CAST(NULL AS NVARCHAR2(100)) FROM dual"
+            };
+            let selection = DatabaseSelection::Query { sql: sql.into() };
+            let source = OracleSource::connect(&environment, &password, &selection)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+            let path = directory.path().join("export");
+            let stage = directory.path().join("stage");
+            let export_spec = JobSpec::new(
+                SourceSpec::Database {
+                    environment_id: environment.id,
+                    selection,
+                    resume_key: Vec::new(),
+                },
+                SinkSpec::File {
+                    path: path.clone(),
+                    format,
+                },
+            );
+            let export_sink = elm_connectors::RecoverableFileSink::new(&path, format, &stage, None)
+                .unwrap_or_else(|error| panic!("{error}"));
+            TransferEngine::new(
+                export_spec,
+                CancellationToken::new(),
+                Arc::new(NoopObserver),
+            )
+            .run(Box::new(source), Box::new(export_sink))
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+
+            if empty {
+                match format {
+                    FileFormat::Csv => assert_eq!(
+                        std::fs::read_to_string(&path)
+                            .unwrap_or_else(|error| panic!("{error}"))
+                            .trim(),
+                        "select,label"
+                    ),
+                    FileFormat::Ndjson => assert!(
+                        std::fs::read(&path)
+                            .unwrap_or_else(|error| panic!("{error}"))
+                            .is_empty()
+                    ),
+                    FileFormat::Parquet => unreachable!(),
+                }
+                continue;
+            }
+            let content = std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{error}"));
+            assert!(content.contains("İstanbul 🌍"));
+
+            let job_id = JobId::new();
+            let target = fixture_target(job_id);
+            let file_source = elm_connectors::FileSource::open(&path, format)
+                .unwrap_or_else(|error| panic!("{error}"));
+            let import_sink =
+                OracleSink::connect(&environment, &password, target.clone(), job_id, None)
+                    .await
+                    .unwrap_or_else(|error| panic!("{error}"));
+            let mut import_spec = JobSpec::new(
+                SourceSpec::File {
+                    path: path.clone(),
+                    format,
+                },
+                SinkSpec::Database {
+                    environment_id: environment.id,
+                    relation: target.clone(),
+                },
+            );
+            // CSV/NDJSON re-inference always produces Int64 for this column, and the Oracle
+            // sink has no native integer mapping (only Decimal128, floats, bounded
+            // strings/binary, and timezone-free timestamps); an explicit conversion is required.
+            import_spec.conversions.push(elm_core::ConversionRule {
+                column: Identifier::new("select").unwrap_or_else(|error| panic!("{error}")),
+                target_type: "float64".into(),
+                allow_lossy: true,
+            });
+            TransferEngine::new(
+                import_spec,
+                CancellationToken::new(),
+                Arc::new(NoopObserver),
+            )
+            .run(Box::new(file_source), Box::new(import_sink))
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+            let mut readback = OracleSource::connect(
+                &environment,
+                &password,
+                &DatabaseSelection::Table {
+                    relation: target.clone(),
+                },
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+            let batch = readback
+                .next_batch(32 * 1024 * 1024)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"))
+                .unwrap_or_else(|| panic!("expected reimported rows"));
+            assert_eq!(batch.num_rows(), 2);
+            let label_index = batch
+                .schema()
+                .fields()
+                .iter()
+                .position(|field| field.data_type() == &arrow_schema::DataType::Utf8)
+                .unwrap_or_else(|| panic!("expected a Utf8 label column"));
+            let labels = batch
+                .column(label_index)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap_or_else(|| panic!("expected label"));
+            assert!((0..2).any(|row| !labels.is_null(row) && labels.value(row) == "İstanbul 🌍"));
+
+            cleanup_oracle_staging(&environment, &password, target.clone(), job_id)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            let connection = native_connection(&environment, &password);
+            fixture_execute(&connection, &format!("DROP TABLE \"{}\"", target.name));
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires Oracle Instant Client and an isolated Oracle database"]
+async fn engine_rejects_an_explicit_lossy_conversion_of_an_unparseable_value() {
+    use elm_core::ConversionRule;
+    use elm_engine::NoopObserver;
+
+    let environment = environment();
+    let password = std::env::var("ELM_TEST_ORACLE_PASSWORD")
+        .unwrap_or_else(|_| panic!("set ELM_TEST_ORACLE_PASSWORD"));
+
+    let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+    let path = directory.path().join("bad.csv");
+    std::fs::write(&path, "value\n1\nnot-a-number\n").unwrap_or_else(|error| panic!("{error}"));
+
+    let job_id = JobId::new();
+    let target = fixture_target(job_id);
+    let file_source = elm_connectors::FileSource::open(&path, FileFormat::Csv)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let sink = OracleSink::connect(&environment, &password, target.clone(), job_id, None)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let mut spec = JobSpec::new(
+        SourceSpec::File {
+            path: path.clone(),
+            format: FileFormat::Csv,
+        },
+        SinkSpec::Database {
+            environment_id: environment.id,
+            relation: target.clone(),
+        },
+    );
+    spec.conversions.push(ConversionRule {
+        column: Identifier::new("value").unwrap_or_else(|error| panic!("{error}")),
+        target_type: "int64".into(),
+        allow_lossy: true,
+    });
+    let result = TransferEngine::new(spec, CancellationToken::new(), Arc::new(NoopObserver))
+        .run(Box::new(file_source), Box::new(sink))
+        .await;
+    assert!(matches!(result, Err(ElmError::TypeMapping(_))));
+
+    let connection = native_connection(&environment, &password);
+    let occupied: u64 = connection
+        .query_row_as(
+            "SELECT COUNT(*) FROM user_tables WHERE table_name = :1",
+            &[&target.name.as_str()],
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(
+        occupied, 0,
+        "a failed conversion must not leave a partial target"
+    );
+}

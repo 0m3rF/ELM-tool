@@ -52,6 +52,7 @@ pub struct TransferEngine {
     cancellation: CancellationToken,
     observer: Arc<dyn EngineObserver>,
     resume_checkpoint: Option<BatchCheckpoint>,
+    extra_warnings: Vec<String>,
 }
 
 impl TransferEngine {
@@ -66,6 +67,7 @@ impl TransferEngine {
             cancellation,
             observer,
             resume_checkpoint: None,
+            extra_warnings: Vec::new(),
         }
     }
 
@@ -73,6 +75,14 @@ impl TransferEngine {
     #[must_use]
     pub fn with_resume_checkpoint(mut self, checkpoint: BatchCheckpoint) -> Self {
         self.resume_checkpoint = Some(checkpoint);
+        self
+    }
+
+    /// Adds warnings determined before preflight (for example, best-effort physical-identity
+    /// discovery) to every progress event alongside the sink's own preflight warnings.
+    #[must_use]
+    pub fn with_extra_warnings(mut self, warnings: Vec<String>) -> Self {
+        self.extra_warnings = warnings;
         self
     }
 
@@ -122,7 +132,8 @@ impl TransferEngine {
             )
             .await?;
         report.require_safe_publication(self.spec.write_mode, self.spec.consistency)?;
-        let warnings = report.warnings;
+        let mut warnings = report.warnings;
+        warnings.extend(self.extra_warnings.iter().cloned());
         sink.begin().await?;
         self.emit(JobState::Running, initial_stats, started, None, &warnings)
             .await?;

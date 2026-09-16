@@ -2212,6 +2212,80 @@ fn publication_error(_error: tokio_postgres::Error) -> ElmError {
     }
 }
 
+/// Resolves `relation`'s physical identity, unwinding one level of view indirection through
+/// `pg_depend`/`pg_rewrite` (never by parsing view SQL text). Returns `Ok(None)` rather than a
+/// guess whenever the relation is missing, is a view depending on more than one base table, or
+/// the connected role cannot read `pg_control_system()`'s cluster-wide `system_identifier`.
+pub(crate) async fn resolve_physical_identity(
+    environment: &Environment,
+    password: &str,
+    relation: &Relation,
+) -> Result<Option<crate::physical_identity::PhysicalIdentity>> {
+    let session = connect(environment, password).await?;
+    let client = &session.client;
+    let Some(row) = client
+        .query_opt(
+            "SELECT n.nspname, c.relname, c.relkind::text, c.oid
+             FROM pg_catalog.pg_class c
+             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname = COALESCE($1, current_schema()) AND c.relname = $2",
+            &[
+                &relation.schema.as_ref().map(Identifier::as_str),
+                &relation.name.as_str(),
+            ],
+        )
+        .await
+        .map_err(metadata_error)?
+    else {
+        return Ok(None);
+    };
+    let mut schema: String = row.try_get(0).map_err(|_| metadata_error(()))?;
+    let mut name: String = row.try_get(1).map_err(|_| metadata_error(()))?;
+    let relkind: String = row.try_get(2).map_err(|_| metadata_error(()))?;
+    let oid: tokio_postgres::types::Oid = row.try_get(3).map_err(|_| metadata_error(()))?;
+    match relkind.as_str() {
+        "r" | "p" => {}
+        "v" => {
+            let dependents = client
+                .query(
+                    "SELECT DISTINCT dep_ns.nspname, dep_class.relname
+                     FROM pg_rewrite r
+                     JOIN pg_depend d ON d.objid = r.oid AND d.refobjid <> r.ev_class
+                     JOIN pg_catalog.pg_class dep_class ON dep_class.oid = d.refobjid
+                     JOIN pg_catalog.pg_namespace dep_ns ON dep_ns.oid = dep_class.relnamespace
+                     WHERE r.ev_class = $1 AND dep_class.relkind IN ('r', 'p')",
+                    &[&oid],
+                )
+                .await
+                .map_err(metadata_error)?;
+            let [only] = dependents.as_slice() else {
+                return Ok(None);
+            };
+            schema = only.try_get(0).map_err(|_| metadata_error(()))?;
+            name = only.try_get(1).map_err(|_| metadata_error(()))?;
+        }
+        _ => return Ok(None),
+    }
+    let Ok(identity_row) = client
+        .query_one(
+            "SELECT system_identifier::text FROM pg_control_system()",
+            &[],
+        )
+        .await
+    else {
+        return Ok(None);
+    };
+    let Ok(system_identifier) = identity_row.try_get::<_, String>(0) else {
+        return Ok(None);
+    };
+    Ok(Some(crate::physical_identity::PhysicalIdentity {
+        server_fingerprint: format!("postgresql:{system_identifier}"),
+        database: environment.database.clone(),
+        base_schema: Some(schema),
+        base_relation: name,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use arrow_schema::{DataType, Field, Schema, TimeUnit};

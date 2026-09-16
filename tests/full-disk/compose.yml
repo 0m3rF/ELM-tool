@@ -1,0 +1,17 @@
+# Isolated disposable fixture: no host ports, no database. Verifies that a staging write
+# fails closed, without a partial destination file, when its filesystem runs out of space.
+services:
+  tests:
+    build: .
+    environment:
+      ELM_TEST_TINY_DISK_DIR: /tiny
+      CARGO_BUILD_JOBS: "4"
+    tmpfs:
+      - /tiny:size=4m
+    volumes:
+      - ../..:/workspace:ro
+      - build:/build
+      - registry:/usr/local/cargo/registry
+volumes:
+  build:
+  registry:

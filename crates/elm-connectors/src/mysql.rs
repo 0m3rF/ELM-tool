@@ -1292,6 +1292,7 @@ impl DataSink for MySqlSink {
             .clone()
             .ok_or_else(|| ElmError::Internal("MySQL sink has no schema".into()))?;
         ensure_mysql_batch_schema(batch.schema().as_ref(), &schema)?;
+        validate_mysql_timestamp_ranges(batch)?;
         let sequence = self.next_sequence;
         let written = if self.local_infile_enabled {
             match load_mysql_batch(
@@ -1896,6 +1897,39 @@ fn ensure_mysql_batch_schema(actual: &Schema, expected: &Schema) -> Result<()> {
     Ok(())
 }
 
+/// Rejects a batch before any write attempt if a timezone-bearing timestamp column (mapped to
+/// native MySQL TIMESTAMP) carries a value outside TIMESTAMP's documented range. DATETIME
+/// columns (Arrow's timezone-free timestamps) have no such restriction and are not checked.
+/// Validating up front, rather than during row encoding, matters specifically for the LOCAL
+/// INFILE path: a per-row error raised while streaming that protocol is reported to the driver
+/// as a generic I/O failure, not this crate's typed error.
+fn validate_mysql_timestamp_ranges(batch: &RecordBatch) -> Result<()> {
+    const MYSQL_TIMESTAMP_MIN_MICROS: i64 = 1_000_000; // 1970-01-01 00:00:01 UTC
+    const MYSQL_TIMESTAMP_MAX_MICROS: i64 = 2_147_483_647_999_999; // 2038-01-19 03:14:07.999999 UTC
+    for (field, column) in batch.schema().fields().iter().zip(batch.columns()) {
+        if !matches!(
+            field.data_type(),
+            DataType::Timestamp(TimeUnit::Microsecond, Some(_))
+        ) {
+            continue;
+        }
+        let values = array_as::<TimestampMicrosecondArray>(column, field)?;
+        for row in 0..values.len() {
+            if values.is_null(row) {
+                continue;
+            }
+            let micros = values.value(row);
+            if !(MYSQL_TIMESTAMP_MIN_MICROS..=MYSQL_TIMESTAMP_MAX_MICROS).contains(&micros) {
+                return Err(ElmError::TypeMapping(format!(
+                    "column '{}' contains a timestamp outside MySQL TIMESTAMP's supported range of 1970-01-01 00:00:01 through 2038-01-19 03:14:07.999999 UTC",
+                    field.name()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn delete_mysql_batch_sequence(
     connection: &mut Conn,
     staging: &Relation,
@@ -2046,6 +2080,67 @@ fn mysql_source_start_error<T>(_error: T) -> ElmError {
         message: "MySQL source query could not start".into(),
         retryable: true,
     }
+}
+
+pub(crate) async fn resolve_physical_identity(
+    environment: &Environment,
+    password: &str,
+    relation: &Relation,
+) -> Result<Option<crate::physical_identity::PhysicalIdentity>> {
+    if relation.catalog.is_some() {
+        return Ok(None);
+    }
+    let (mut connection, _tls_enabled) = connect_mysql(environment, password).await?;
+    let schema = relation.schema.as_ref().map_or_else(
+        || environment.database.clone(),
+        |value| value.as_str().to_owned(),
+    );
+    let name = relation.name.as_str().to_owned();
+
+    let table_type: Option<String> = connection
+        .exec_first(
+            "SELECT table_type FROM information_schema.tables WHERE table_schema = ? AND table_name = ? LIMIT 1",
+            (schema.as_str(), name.as_str()),
+        )
+        .await
+        .map_err(mysql_metadata_error)?;
+    let Some(table_type) = table_type else {
+        return Ok(None);
+    };
+    let (base_schema, base_name) = match table_type.as_str() {
+        "BASE TABLE" => (schema, name),
+        "VIEW" => {
+            let mut dependents: Vec<(String, String)> = connection
+                .exec(
+                    "SELECT DISTINCT table_schema, table_name FROM information_schema.view_table_usage WHERE view_schema = ? AND view_name = ?",
+                    (schema.as_str(), name.as_str()),
+                )
+                .await
+                .map_err(mysql_metadata_error)?;
+            dependents.sort();
+            dependents.dedup();
+            let [only] = dependents.as_slice() else {
+                return Ok(None);
+            };
+            only.clone()
+        }
+        _ => return Ok(None),
+    };
+
+    let server_uuid: Option<String> = connection
+        .query_first("SELECT @@server_uuid")
+        .await
+        .map_err(mysql_metadata_error)?;
+    let Some(server_uuid) = server_uuid else {
+        return Ok(None);
+    };
+
+    Ok(Some(crate::physical_identity::PhysicalIdentity {
+        server_fingerprint: format!("mysql:{server_uuid}"),
+        database: environment.database.clone(),
+        base_schema: Some(base_schema),
+        base_relation: base_name,
+    }))
 }
 
 #[cfg(test)]

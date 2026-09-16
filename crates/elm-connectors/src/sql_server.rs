@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 use elm_core::{DataSource, DatabaseKind, DatabaseSelection, ElmError, Environment, Result};
 use odbc_api::{
-    ColumnDescription, Cursor, ResultSetMetadata,
+    ColumnDescription, Cursor, IntoParameter, ResultSetMetadata,
     buffers::{AnySlice, BufferDesc, ColumnarAnyBuffer},
 };
 use secrecy::{ExposeSecret, SecretString};
@@ -461,6 +461,195 @@ fn convert_column(column: AnySlice<'_>) -> Result<ArrayRef> {
             ));
         }
     })
+}
+
+pub(crate) async fn resolve_physical_identity(
+    environment: &Environment,
+    password: &str,
+    relation: &elm_core::Relation,
+) -> Result<Option<crate::physical_identity::PhysicalIdentity>> {
+    if relation.catalog.is_some() {
+        return Ok(None);
+    }
+    let connection_string = sql_server_connection_string(environment, password)?;
+    let schema = relation
+        .schema
+        .as_ref()
+        .map_or_else(|| "dbo".to_owned(), |value| value.as_str().to_owned());
+    let name = relation.name.as_str().to_owned();
+    let database = environment.database.clone();
+    tokio::task::spawn_blocking(move || {
+        resolve_sql_server_identity_blocking(&connection_string, &schema, &name, &database)
+    })
+    .await
+    .map_err(|_| ElmError::Internal("SQL Server physical-identity worker stopped".into()))?
+}
+
+fn resolve_sql_server_identity_blocking(
+    connection_string: &SecretString,
+    schema: &str,
+    name: &str,
+    database: &str,
+) -> Result<Option<crate::physical_identity::PhysicalIdentity>> {
+    let manager = sql_server_manager()?;
+    let connection = manager
+        .connect_with_connection_string(
+            connection_string.expose_secret(),
+            odbc_api::ConnectionOptions {
+                login_timeout_sec: Some(15),
+                ..Default::default()
+            },
+        )
+        .map_err(|_| source_error())?;
+
+    let schema_param = schema.into_parameter();
+    let name_param = name.into_parameter();
+    let is_base_table = sql_server_text_scalar(
+        &connection,
+        "SELECT CAST(1 AS VARCHAR(1)) FROM sys.tables WHERE schema_id = SCHEMA_ID(?) AND name = ?",
+        (&schema_param, &name_param),
+    )?
+    .is_some();
+
+    let (base_schema, base_name) = if is_base_table {
+        (schema.to_owned(), name.to_owned())
+    } else if let Some(base_object) = sql_server_text_scalar(
+        &connection,
+        "SELECT base_object_name FROM sys.synonyms WHERE schema_id = SCHEMA_ID(?) AND name = ?",
+        (&schema_param, &name_param),
+    )? {
+        let Some(parts) = split_sql_server_object_name(&base_object) else {
+            return Ok(None);
+        };
+        parts
+    } else {
+        let qualified = format!(
+            "[{}].[{}]",
+            schema.replace(']', "]]"),
+            name.replace(']', "]]")
+        );
+        let qualified_param = qualified.into_parameter();
+        let dependents = sql_server_text_pairs(
+            &connection,
+            "SELECT DISTINCT referenced_schema_name, referenced_entity_name
+             FROM sys.sql_expression_dependencies
+             WHERE referencing_id = OBJECT_ID(?) AND referenced_entity_name IS NOT NULL",
+            (&qualified_param,),
+        )?;
+        let [only] = dependents.as_slice() else {
+            return Ok(None);
+        };
+        only.clone()
+    };
+
+    let Some(fingerprint) = sql_server_text_scalar(
+        &connection,
+        "SELECT CAST(SERVERPROPERTY('ServerName') AS NVARCHAR(256)) + N':' + CONVERT(NVARCHAR(33), create_date, 126) FROM sys.databases WHERE database_id = DB_ID()",
+        (),
+    )?
+    else {
+        return Ok(None);
+    };
+
+    Ok(Some(crate::physical_identity::PhysicalIdentity {
+        server_fingerprint: format!("sql_server:{fingerprint}"),
+        database: database.to_owned(),
+        base_schema: Some(base_schema),
+        base_relation: base_name,
+    }))
+}
+
+fn sql_server_text_scalar(
+    connection: &odbc_api::Connection<'_>,
+    sql: &str,
+    params: impl odbc_api::ParameterCollectionRef,
+) -> Result<Option<String>> {
+    let Some(mut cursor) = connection
+        .execute(sql, params, Some(15))
+        .map_err(|_| source_error())?
+    else {
+        return Ok(None);
+    };
+    let Some(mut row) = cursor.next_row().map_err(|_| source_error())? else {
+        return Ok(None);
+    };
+    let mut buffer = Vec::new();
+    let has_value = row.get_text(1, &mut buffer).map_err(|_| source_error())?;
+    if !has_value {
+        return Ok(None);
+    }
+    String::from_utf8(buffer)
+        .map(Some)
+        .map_err(|_| source_error())
+}
+
+fn sql_server_text_pairs(
+    connection: &odbc_api::Connection<'_>,
+    sql: &str,
+    params: impl odbc_api::ParameterCollectionRef,
+) -> Result<Vec<(String, String)>> {
+    let Some(mut cursor) = connection
+        .execute(sql, params, Some(15))
+        .map_err(|_| source_error())?
+    else {
+        return Ok(Vec::new());
+    };
+    let mut rows = Vec::new();
+    while let Some(mut row) = cursor.next_row().map_err(|_| source_error())? {
+        let mut first = Vec::new();
+        let mut second = Vec::new();
+        let has_first = row.get_text(1, &mut first).map_err(|_| source_error())?;
+        let has_second = row.get_text(2, &mut second).map_err(|_| source_error())?;
+        if !has_first || !has_second {
+            return Ok(Vec::new());
+        }
+        let first = String::from_utf8(first).map_err(|_| source_error())?;
+        let second = String::from_utf8(second).map_err(|_| source_error())?;
+        rows.push((first, second));
+    }
+    Ok(rows)
+}
+
+fn split_sql_server_object_name(value: &str) -> Option<(String, String)> {
+    let parts = split_sql_server_qualified_name(value)?;
+    match parts.len() {
+        2 => Some((parts[0].clone(), parts[1].clone())),
+        3 => Some((parts[1].clone(), parts[2].clone())),
+        _ => None,
+    }
+}
+
+fn split_sql_server_qualified_name(value: &str) -> Option<Vec<String>> {
+    let mut parts = Vec::new();
+    let mut chars = value.chars().peekable();
+    let mut current = String::new();
+    while let Some(character) = chars.next() {
+        match character {
+            '[' => {
+                let iter = chars.by_ref();
+                while let Some(inner) = iter.next() {
+                    if inner == ']' {
+                        if iter.peek() == Some(&']') {
+                            current.push(']');
+                            iter.next();
+                            continue;
+                        }
+                        break;
+                    }
+                    current.push(inner);
+                }
+            }
+            '.' => {
+                parts.push(std::mem::take(&mut current));
+            }
+            _ => current.push(character),
+        }
+    }
+    parts.push(current);
+    if parts.iter().any(String::is_empty) {
+        return None;
+    }
+    Some(parts)
 }
 
 #[cfg(test)]

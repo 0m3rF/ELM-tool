@@ -947,3 +947,708 @@ async fn sink_resume_trims_only_the_uncheckpointed_batch() {
         .await
         .unwrap_or_else(|error| panic!("{error}"));
 }
+
+#[tokio::test]
+#[ignore = "requires a MySQL test instance"]
+async fn physical_identity_resolves_through_a_view_and_rejects_unrelated_tables() {
+    let environment = environment();
+    let password = password();
+    let mut connection = Conn::new(connection_options(&environment, &password))
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("DROP VIEW IF EXISTS elm_my_identity_view")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("DROP TABLE IF EXISTS elm_my_identity_base")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("DROP TABLE IF EXISTS elm_my_identity_other")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("CREATE TABLE elm_my_identity_base (id BIGINT)")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("CREATE TABLE elm_my_identity_other (id BIGINT)")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("CREATE VIEW elm_my_identity_view AS SELECT * FROM elm_my_identity_base")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let base = elm_connectors::physical_identity::resolve(
+        &environment,
+        &password,
+        &relation("elm_my_identity_base"),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"))
+    .unwrap_or_else(|| panic!("expected a resolvable base table identity"));
+    let via_view = elm_connectors::physical_identity::resolve(
+        &environment,
+        &password,
+        &relation("elm_my_identity_view"),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"))
+    .unwrap_or_else(|| panic!("expected a resolvable view identity"));
+    let other = elm_connectors::physical_identity::resolve(
+        &environment,
+        &password,
+        &relation("elm_my_identity_other"),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"))
+    .unwrap_or_else(|| panic!("expected a resolvable unrelated table identity"));
+    let missing = elm_connectors::physical_identity::resolve(
+        &environment,
+        &password,
+        &relation("elm_my_identity_missing"),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+
+    assert!(base.same_physical_table(&via_view));
+    assert!(!base.same_physical_table(&other));
+    assert!(missing.is_none());
+
+    connection
+        .query_drop("DROP VIEW elm_my_identity_view")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("DROP TABLE elm_my_identity_base")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("DROP TABLE elm_my_identity_other")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[tokio::test]
+#[ignore = "requires a MySQL test instance"]
+async fn sink_rejects_timestamps_outside_native_timestamp_range() {
+    use arrow_array::RecordBatch;
+    use arrow_schema::{Field, Schema};
+    use elm_core::{ConsistencyMode, JobId, WriteMode};
+
+    let environment = environment();
+    let password = password();
+    let mut connection = Conn::new(connection_options(&environment, &password))
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("DROP TABLE IF EXISTS elm_mysql_timestamp_range")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let schema = std::sync::Arc::new(Schema::new(vec![Field::new(
+        "occurred_at",
+        DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+        true,
+    )]));
+    let job_id = JobId::new();
+    let mut sink = MySqlSink::connect(
+        &environment,
+        &password,
+        relation("elm_mysql_timestamp_range"),
+        job_id,
+        None,
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+    sink.preflight(schema.clone(), WriteMode::Fail, ConsistencyMode::Atomic)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    sink.begin().await.unwrap_or_else(|error| panic!("{error}"));
+
+    // 2040-01-01 is outside MySQL TIMESTAMP's 1970-2038 supported range.
+    let out_of_range = chrono::NaiveDate::from_ymd_opt(2040, 1, 1)
+        .unwrap_or_else(|| panic!("invalid fixture date"))
+        .and_hms_opt(0, 0, 0)
+        .unwrap_or_else(|| panic!("invalid fixture time"))
+        .and_utc()
+        .timestamp_micros();
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![std::sync::Arc::new(
+            TimestampMicrosecondArray::from(vec![Some(out_of_range)]).with_timezone("UTC"),
+        )],
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+    let result = sink.write_batch(&batch).await;
+    assert!(matches!(result, Err(elm_core::ElmError::TypeMapping(_))));
+
+    // A value inside the supported range still succeeds and round-trips.
+    let in_range = chrono::NaiveDate::from_ymd_opt(2024, 3, 1)
+        .unwrap_or_else(|| panic!("invalid fixture date"))
+        .and_hms_micro_opt(7, 20, 30, 654_321)
+        .unwrap_or_else(|| panic!("invalid fixture time"))
+        .and_utc()
+        .timestamp_micros();
+    let ok_batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![std::sync::Arc::new(
+            TimestampMicrosecondArray::from(vec![Some(in_range)]).with_timezone("UTC"),
+        )],
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+    sink.write_batch(&ok_batch)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    sink.commit_checkpoint(&BatchCheckpoint {
+        sequence: 0,
+        rows_committed: 1,
+        bytes_committed: 0,
+        source_fingerprint: None,
+        source_position: serde_json::json!({"row": 1}),
+    })
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+    sink.publish()
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let stored: Option<String> = connection
+        .query_first("SELECT occurred_at FROM elm_mysql_timestamp_range")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(stored, Some("2024-03-01 07:20:30.654321".into()));
+
+    connection
+        .query_drop("DROP TABLE elm_mysql_timestamp_range")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[tokio::test]
+#[ignore = "requires a MySQL test instance"]
+async fn sink_begin_rejects_a_user_without_create_privilege() {
+    use elm_core::ConsistencyMode;
+
+    let environment = environment();
+    let password = password();
+    let mut connection = Conn::new(connection_options(&environment, &password))
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("DROP USER IF EXISTS elm_restricted_user")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("CREATE USER elm_restricted_user IDENTIFIED BY 'elm-restricted-only'")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("GRANT SELECT ON elm_test.* TO elm_restricted_user")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let mut restricted_environment = environment.clone();
+    restricted_environment.username = "elm_restricted_user".into();
+    let schema = std::sync::Arc::new(arrow_schema::Schema::new(vec![arrow_schema::Field::new(
+        "id",
+        DataType::Int64,
+        false,
+    )]));
+    let job_id = JobId::new();
+    let mut sink = MySqlSink::connect(
+        &restricted_environment,
+        "elm-restricted-only",
+        relation("elm_mysql_privilege_target"),
+        job_id,
+        None,
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+    sink.preflight(schema, WriteMode::Fail, ConsistencyMode::Atomic)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let result = sink.begin().await;
+    assert!(matches!(result, Err(ElmError::PermissionDenied(_))));
+
+    connection
+        .query_drop("DROP USER elm_restricted_user")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[tokio::test]
+#[ignore = "requires a MySQL test instance"]
+async fn engine_round_trips_through_parquet_with_reserved_identifiers_and_canonical_types() {
+    use elm_core::{FileFormat, JobSpec, SinkSpec, SourceSpec};
+    use elm_engine::{NoopObserver, TransferEngine};
+    use tokio_util::sync::CancellationToken;
+
+    let environment = environment();
+    let password = password();
+    let mut connection = Conn::new(connection_options(&environment, &password))
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("DROP TABLE IF EXISTS elm_my_file_source")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("DROP TABLE IF EXISTS elm_my_file_target")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop(
+            "CREATE TABLE elm_my_file_source (
+                `select` BIGINT,
+                label VARCHAR(100) CHARACTER SET utf8mb4,
+                amount DECIMAL(18, 4),
+                payload VARBINARY(100),
+                occurred_at TIMESTAMP(6) NULL
+             )",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop(
+            "INSERT INTO elm_my_file_source VALUES
+             (1, 'İstanbul 🌍', -12345.6700, X'0001FF', '2024-03-01 07:20:30.654321'),
+             (2, NULL, NULL, NULL, NULL)",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+    let path = directory.path().join("export.parquet");
+    let stage = directory.path().join("stage");
+
+    let selection = DatabaseSelection::Table {
+        relation: relation("elm_my_file_source"),
+    };
+    let source = MySqlSource::connect(&environment, &password, &selection)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let export_spec = JobSpec::new(
+        SourceSpec::Database {
+            environment_id: environment.id,
+            selection,
+            resume_key: Vec::new(),
+        },
+        SinkSpec::File {
+            path: path.clone(),
+            format: FileFormat::Parquet,
+        },
+    );
+    let export_sink =
+        elm_connectors::RecoverableFileSink::new(&path, FileFormat::Parquet, &stage, None)
+            .unwrap_or_else(|error| panic!("{error}"));
+    TransferEngine::new(
+        export_spec,
+        CancellationToken::new(),
+        std::sync::Arc::new(NoopObserver),
+    )
+    .run(Box::new(source), Box::new(export_sink))
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+
+    let target = relation("elm_my_file_target");
+    let file_source = elm_connectors::FileSource::open(&path, FileFormat::Parquet)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let job_id = JobId::new();
+    let import_sink = MySqlSink::connect(&environment, &password, target.clone(), job_id, None)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let import_spec = JobSpec::new(
+        SourceSpec::File {
+            path: path.clone(),
+            format: FileFormat::Parquet,
+        },
+        SinkSpec::Database {
+            environment_id: environment.id,
+            relation: target.clone(),
+        },
+    );
+    TransferEngine::new(
+        import_spec,
+        CancellationToken::new(),
+        std::sync::Arc::new(NoopObserver),
+    )
+    .run(Box::new(file_source), Box::new(import_sink))
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+
+    let mut readback = MySqlSource::connect(
+        &environment,
+        &password,
+        &DatabaseSelection::Table {
+            relation: target.clone(),
+        },
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+    let batch = readback
+        .next_batch(8192)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+        .unwrap_or_else(|| panic!("expected reimported rows"));
+    assert_eq!(batch.num_rows(), 2);
+    let ids = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap_or_else(|| panic!("expected select id"));
+    let labels = batch
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap_or_else(|| panic!("expected label"));
+    let amounts = batch
+        .column(2)
+        .as_any()
+        .downcast_ref::<Decimal128Array>()
+        .unwrap_or_else(|| panic!("expected amount"));
+    let payloads = batch
+        .column(3)
+        .as_any()
+        .downcast_ref::<BinaryArray>()
+        .unwrap_or_else(|| panic!("expected payload"));
+    for row in 0..2 {
+        match ids.value(row) {
+            1 => {
+                assert_eq!(labels.value(row), "İstanbul 🌍");
+                assert_eq!(amounts.value(row), -123_456_700);
+                assert_eq!(payloads.value(row), [0x00, 0x01, 0xff]);
+            }
+            2 => {
+                assert!(labels.is_null(row));
+                assert!(amounts.is_null(row));
+                assert!(payloads.is_null(row));
+            }
+            other => panic!("unexpected reimported id {other}"),
+        }
+    }
+
+    connection
+        .query_drop("DROP TABLE elm_my_file_source")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("DROP TABLE elm_my_file_target")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[tokio::test]
+#[ignore = "requires a MySQL test instance"]
+async fn engine_round_trips_csv_and_ndjson_including_empty_results() {
+    use elm_core::{FileFormat, JobSpec, SinkSpec, SourceSpec};
+    use elm_engine::{NoopObserver, TransferEngine};
+    use tokio_util::sync::CancellationToken;
+
+    let environment = environment();
+    let password = password();
+    let mut connection = Conn::new(connection_options(&environment, &password))
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("DROP TABLE IF EXISTS elm_my_text_source")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop(
+            "CREATE TABLE elm_my_text_source (`select` BIGINT, label VARCHAR(100) CHARACTER SET utf8mb4, event_day DATE)",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop(
+            "INSERT INTO elm_my_text_source VALUES
+             (1, 'İstanbul 🌍', DATE '2024-02-29'),
+             (2, NULL, NULL)",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    for format in [FileFormat::Csv, FileFormat::Ndjson] {
+        for empty in [false, true] {
+            let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+            let path = directory.path().join("export");
+            let stage = directory.path().join("stage");
+            let sql = if empty {
+                "SELECT * FROM elm_my_text_source WHERE 1=0"
+            } else {
+                "SELECT * FROM elm_my_text_source ORDER BY `select`"
+            };
+            let selection = DatabaseSelection::Query { sql: sql.into() };
+            let source = MySqlSource::connect(&environment, &password, &selection)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            let export_spec = JobSpec::new(
+                SourceSpec::Database {
+                    environment_id: environment.id,
+                    selection,
+                    resume_key: Vec::new(),
+                },
+                SinkSpec::File {
+                    path: path.clone(),
+                    format,
+                },
+            );
+            let export_sink = elm_connectors::RecoverableFileSink::new(&path, format, &stage, None)
+                .unwrap_or_else(|error| panic!("{error}"));
+            TransferEngine::new(
+                export_spec,
+                CancellationToken::new(),
+                std::sync::Arc::new(NoopObserver),
+            )
+            .run(Box::new(source), Box::new(export_sink))
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+
+            if empty {
+                match format {
+                    FileFormat::Csv => assert_eq!(
+                        std::fs::read_to_string(&path)
+                            .unwrap_or_else(|error| panic!("{error}"))
+                            .trim(),
+                        "select,label,event_day"
+                    ),
+                    FileFormat::Ndjson => assert!(
+                        std::fs::read(&path)
+                            .unwrap_or_else(|error| panic!("{error}"))
+                            .is_empty()
+                    ),
+                    FileFormat::Parquet => unreachable!(),
+                }
+                continue;
+            }
+            let content = std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{error}"));
+            assert!(content.contains("İstanbul 🌍"));
+            assert!(content.contains("2024-02-29"));
+
+            let target = relation("elm_my_text_target");
+            connection
+                .query_drop("DROP TABLE IF EXISTS elm_my_text_target")
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            let file_source = elm_connectors::FileSource::open(&path, format)
+                .unwrap_or_else(|error| panic!("{error}"));
+            let job_id = JobId::new();
+            let import_sink =
+                MySqlSink::connect(&environment, &password, target.clone(), job_id, None)
+                    .await
+                    .unwrap_or_else(|error| panic!("{error}"));
+            let import_spec = JobSpec::new(
+                SourceSpec::File {
+                    path: path.clone(),
+                    format,
+                },
+                SinkSpec::Database {
+                    environment_id: environment.id,
+                    relation: target.clone(),
+                },
+            );
+            TransferEngine::new(
+                import_spec,
+                CancellationToken::new(),
+                std::sync::Arc::new(NoopObserver),
+            )
+            .run(Box::new(file_source), Box::new(import_sink))
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+            let mut readback = MySqlSource::connect(
+                &environment,
+                &password,
+                &DatabaseSelection::Table {
+                    relation: target.clone(),
+                },
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+            let batch = readback
+                .next_batch(8192)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"))
+                .unwrap_or_else(|| panic!("expected reimported rows"));
+            assert_eq!(batch.num_rows(), 2);
+            let labels = batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap_or_else(|| panic!("expected label"));
+            assert!((0..2).any(|row| !labels.is_null(row) && labels.value(row) == "İstanbul 🌍"));
+            connection
+                .query_drop("DROP TABLE elm_my_text_target")
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+        }
+    }
+
+    connection
+        .query_drop("DROP TABLE elm_my_text_source")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[tokio::test]
+#[ignore = "requires a MySQL test instance"]
+async fn engine_rejects_an_explicit_lossy_conversion_of_an_unparseable_value() {
+    use elm_core::{ConversionRule, FileFormat, JobSpec, SinkSpec, SourceSpec};
+    use elm_engine::{NoopObserver, TransferEngine};
+    use tokio_util::sync::CancellationToken;
+
+    let environment = environment();
+    let password = password();
+    let mut connection = Conn::new(connection_options(&environment, &password))
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("DROP TABLE IF EXISTS elm_my_conversion_target")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+    let path = directory.path().join("bad.csv");
+    std::fs::write(&path, "value\n1\nnot-a-number\n").unwrap_or_else(|error| panic!("{error}"));
+
+    let target = relation("elm_my_conversion_target");
+    let file_source = elm_connectors::FileSource::open(&path, FileFormat::Csv)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let job_id = JobId::new();
+    let sink = MySqlSink::connect(&environment, &password, target.clone(), job_id, None)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let mut spec = JobSpec::new(
+        SourceSpec::File {
+            path: path.clone(),
+            format: FileFormat::Csv,
+        },
+        SinkSpec::Database {
+            environment_id: environment.id,
+            relation: target.clone(),
+        },
+    );
+    spec.conversions.push(ConversionRule {
+        column: Identifier::new("value").unwrap_or_else(|error| panic!("{error}")),
+        target_type: "int64".into(),
+        allow_lossy: true,
+    });
+    let result = TransferEngine::new(
+        spec,
+        CancellationToken::new(),
+        std::sync::Arc::new(NoopObserver),
+    )
+    .run(Box::new(file_source), Box::new(sink))
+    .await;
+    assert!(matches!(result, Err(ElmError::TypeMapping(_))));
+
+    let exists: Option<u8> = connection
+        .exec_first(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = ? AND table_name = ? LIMIT 1",
+            (environment.database.as_str(), "elm_my_conversion_target"),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert!(
+        exists.is_none(),
+        "a failed conversion must not leave a partial target"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires a MySQL test instance"]
+async fn engine_cancellation_mid_transfer_leaves_no_new_target() {
+    use elm_core::{JobSpec, SinkSpec, SourceSpec};
+    use elm_engine::{NoopObserver, TransferEngine};
+    use tokio_util::sync::CancellationToken;
+
+    let environment = environment();
+    let password = password();
+    let mut connection = Conn::new(connection_options(&environment, &password))
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("DROP TABLE IF EXISTS elm_my_cancel_source")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("DROP TABLE IF EXISTS elm_my_cancel_target")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop(
+            "CREATE TABLE elm_my_cancel_source (id BIGINT NOT NULL, label TEXT) ENGINE=InnoDB",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop("SET SESSION cte_max_recursion_depth = 60000")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    connection
+        .query_drop(
+            "INSERT INTO elm_my_cancel_source
+             WITH RECURSIVE seq AS (
+                 SELECT 1 AS n
+                 UNION ALL
+                 SELECT n + 1 FROM seq WHERE n < 50000
+             )
+             SELECT n, REPEAT('x', 2000) FROM seq",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+    let selection = DatabaseSelection::Table {
+        relation: relation("elm_my_cancel_source"),
+    };
+    let source = MySqlSource::connect(&environment, &password, &selection)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let target = relation("elm_my_cancel_target");
+    let job_id = JobId::new();
+    let sink = MySqlSink::connect(&environment, &password, target.clone(), job_id, None)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let mut spec = JobSpec::new(
+        SourceSpec::Database {
+            environment_id: environment.id,
+            selection,
+            resume_key: Vec::new(),
+        },
+        SinkSpec::Database {
+            environment_id: environment.id,
+            relation: target.clone(),
+        },
+    );
+    spec.batch_target_bytes = elm_core::MIN_BATCH_TARGET_BYTES;
+    let cancellation = CancellationToken::new();
+    let engine = TransferEngine::new(
+        spec,
+        cancellation.clone(),
+        std::sync::Arc::new(NoopObserver),
+    );
+    let handle = tokio::spawn(engine.run(Box::new(source), Box::new(sink)));
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    cancellation.cancel();
+    let result = handle.await.unwrap_or_else(|error| panic!("{error}"));
+    assert!(matches!(result, Err(ElmError::Cancelled)));
+
+    let exists: Option<u8> = connection
+        .exec_first(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = ? AND table_name = ? LIMIT 1",
+            (environment.database.as_str(), "elm_my_cancel_target"),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert!(
+        exists.is_none(),
+        "a cancelled transfer must not leave a new target"
+    );
+
+    connection
+        .query_drop("DROP TABLE elm_my_cancel_source")
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+}

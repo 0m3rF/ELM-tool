@@ -19,8 +19,8 @@ use elm_connectors::{
     test_mysql_environment, test_postgres_environment,
 };
 use elm_core::{
-    BatchCheckpoint, DataSink, DataSource, DatabaseKind, ElmError, EnvironmentId, JobId,
-    JobProgress, JobSpec, JobState, Result, SinkSpec, SourceSpec,
+    BatchCheckpoint, DataSink, DataSource, DatabaseKind, DatabaseSelection, ElmError,
+    EnvironmentId, JobId, JobProgress, JobSpec, JobState, Result, SinkSpec, SourceSpec,
     masking::mask_text,
     protocol::{IPC_PROTOCOL_VERSION, Operation, RequestEnvelope, Response, ResponseEnvelope},
 };
@@ -706,8 +706,10 @@ async fn execute_job(
             }
         }
     };
+    let extra_warnings = physical_identity_warnings(&store, &spec).await;
     let job_id = spec.id;
-    let mut engine = TransferEngine::new(spec, cancellation, observer);
+    let mut engine =
+        TransferEngine::new(spec, cancellation, observer).with_extra_warnings(extra_warnings);
     if let Some(checkpoint) = effective_checkpoint {
         engine = engine.with_resume_checkpoint(checkpoint);
     }
@@ -719,6 +721,61 @@ async fn execute_job(
         }
     }
     Ok(())
+}
+
+/// Best-effort diagnostic: warns when a job's source and destination resolve to the same
+/// physical table (directly, through a view/synonym, or through a second environment record
+/// for the same physical server). Never fails the job; any lookup error is treated the same as
+/// "identity unknown" and produces no warning.
+async fn physical_identity_warnings(store: &StateStore, spec: &JobSpec) -> Vec<String> {
+    let SourceSpec::Database {
+        environment_id: source_environment_id,
+        selection: DatabaseSelection::Table {
+            relation: source_relation,
+        },
+        ..
+    } = &spec.source
+    else {
+        return Vec::new();
+    };
+    let SinkSpec::Database {
+        environment_id: sink_environment_id,
+        relation: sink_relation,
+    } = &spec.sink
+    else {
+        return Vec::new();
+    };
+    let identities = async {
+        let source_environment = store.get_environment(*source_environment_id)?;
+        let source_password = KeyringVault::default().get(&source_environment.credential_ref)?;
+        let source_identity = elm_connectors::physical_identity::resolve(
+            &source_environment,
+            source_password.expose_secret(),
+            source_relation,
+        )
+        .await?;
+        let sink_environment = store.get_environment(*sink_environment_id)?;
+        let sink_password = KeyringVault::default().get(&sink_environment.credential_ref)?;
+        let sink_identity = elm_connectors::physical_identity::resolve(
+            &sink_environment,
+            sink_password.expose_secret(),
+            sink_relation,
+        )
+        .await?;
+        Result::Ok((source_identity, sink_identity))
+    }
+    .await;
+    let Ok((Some(source_identity), Some(sink_identity))) = identities else {
+        return Vec::new();
+    };
+    if source_identity.same_physical_table(&sink_identity) {
+        vec![elm_connectors::physical_identity::same_table_warning(
+            source_relation,
+            sink_relation,
+        )]
+    } else {
+        Vec::new()
+    }
 }
 
 fn database_recovery_resource(environment_id: EnvironmentId, job_id: JobId) -> String {
@@ -893,6 +950,17 @@ mod tests {
             Some(checkpoint)
         );
         assert!(validate_source_resume(DatabaseKind::PostgreSql, true).is_ok());
+        for kind in [
+            DatabaseKind::MySql,
+            DatabaseKind::SqlServer,
+            DatabaseKind::Oracle,
+        ] {
+            assert!(validate_source_resume(kind, false).is_ok());
+            assert!(matches!(
+                validate_source_resume(kind, true),
+                Err(ElmError::Unsupported(_))
+            ));
+        }
     }
 
     #[tokio::test]
