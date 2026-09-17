@@ -364,6 +364,31 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
 ## 5. Native platforms and distribution
 
 - [ ] Run Windows/macOS/Linux native database-driver and OS-keychain acceptance, including Oracle and ODBC setup failures.
+  Partial pass on 2026-09-17, Windows PostgreSQL only (no macOS/Linux hardware and no Oracle
+  Instant Client/SQL Server Driver 18 installed on this Windows host; only PostgreSQL's driver is
+  pure-Rust and needs no native client library). Everything up to now had only run against Linux
+  Docker containers (see §1); this is the first time any of it ran as a native Windows process.
+  - `crates/elm-daemon/tests/postgres_preview.rs`'s ignored daemon test (previously never run at
+    all — its own doc comment only described a Linux/Docker invocation) ran natively on Windows
+    against the disposable fixture in `tests/cross-database/compose.yml`
+    (`docker compose -p elm-daemon-preview -f tests/cross-database/compose.yml up -d postgres
+    --wait`) and passed. This specifically exercises `KeyringVault` against real Windows
+    Credential Manager, not Linux Secret Service: it stores a real credential, runs a job preview
+    over the daemon's Windows named-pipe IPC transport, then removes the credential. Verified
+    with `cmdkey /list` after the run that no credential was left behind — real cleanup, not
+    just a passing assertion.
+  - The full ignored `crates/elm-connectors/tests/postgresql.rs` suite (13 tests) ran natively on
+    Windows against a dedicated `postgres:16` container (`elm_test` database, matching the
+    suite's hardcoded default — its own doc comment names this as a separate fixture from the
+    cross-database one, which uses a differently named database and doesn't work for this suite).
+    All 13 passed, including the connection-loss fault-injection test, which does a real `docker
+    restart` on the fixture mid-transfer and confirms the native Windows `tokio-postgres` client
+    surfaces a clean connection error within a bounded timeout rather than hanging.
+  Both fixtures torn down afterward (`docker compose ... down --volumes`, `docker stop`); the
+  disposable password file was deleted from the scratch directory. **Not done**: MySQL, SQL
+  Server, and Oracle native-Windows acceptance (the latter two need their proprietary
+  clients/drivers installed, which this host doesn't have and installing wasn't requested);
+  macOS and Linux native (non-Docker) acceptance; and ODBC setup-failure scenarios specifically.
 - [ ] Verify TLS/certificate validation and credentials containing URL metacharacters.
 - [ ] Build and smoke-test standalone CLI/daemon plus Windows installers, macOS DMGs, Linux AppImage/deb.
   Partial pass on 2026-09-17, Windows CLI/daemon binaries only. `cargo build --release -p elm-cli
