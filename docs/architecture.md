@@ -13,16 +13,20 @@ Tauri desktop ────────┘                                  │
 
 ## Process and memory boundary
 
-`elm-engine` admits each batch through a semaphore measured in 64 KiB permits. A masked batch
-reserves twice its observed Arrow allocation until the old and transformed arrays can be released.
-Two bounded Tokio channels connect acquisition, transform, and sink stages. This provides
-backpressure independently of connector row counts. A batch larger than the configured process
-budget fails with `resource_exhausted`; it is never accepted optimistically.
+`elm-engine` admits each batch through a semaphore measured in 64 KiB permits. A batch that will be
+masked or converted reserves twice its observed Arrow allocation until the old and transformed
+arrays can be released; an untransformed batch reserves once. Two bounded Tokio channels connect
+acquisition, transform, and sink stages. This provides backpressure independently of connector row
+counts. A batch larger than the configured process budget fails with `resource_exhausted`; it is
+never accepted optimistically.
 
 Connectors receive a byte target, not a fixed row count. `AdaptiveBatchSizer` learns observed row
-width and converts the 8–32 MiB byte target into a row hint. Job-scoped spill files allow a connector
-that advertised LOB spill support to stream an exceptional value in bounded chunks. The temporary
-directory is deleted on drop.
+width and converts the 8–32 MiB byte target into a row hint. `elm-engine::SpillStore` exists as a
+job-scoped, disk-backed store for a value too large to hold in the batch memory budget, deleting its
+temporary directory on drop, but it is not wired into any connector or the pipeline today: every
+connector reports `supports_lob_spill: false`, so an oversized value is bounded only by the ambient
+per-batch memory budget today, not by a dedicated spill path. See `docs/connectors.md` for the
+per-connector detail.
 
 Mask and conversion transforms execute from the versioned job contract. Conversion planning derives
 the sink schema before loading, rejects unsupported casts, and conservatively classifies lossless

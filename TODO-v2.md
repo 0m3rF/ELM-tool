@@ -372,6 +372,32 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
   not check every mapping table entry line-by-line, did not read `docs/architecture.md` or
   `docs/correctness-contract.md` at all, and did not review production-precautions prose
   specifically. Leaving unchecked rather than claiming a full pass on a partial sample.
+
+  Follow-up on 2026-09-17: read `docs/architecture.md` and `docs/correctness-contract.md` in
+  full and cross-checked their most safety/correctness-relevant claims against current source —
+  the 64 KiB memory-permit quantum and 2x reserve multiplier for masked/converted batches
+  (`crates/elm-engine/src/memory.rs`, `pipeline.rs`), the two bounded `mpsc::channel(2)` pipeline
+  stages, the 244-bit IPC token (two concatenated UUIDv4s = 2×122 random bits) and its `0o600`
+  Unix file/socket permissions (`crates/elm-daemon/src/paths.rs`, `transport.rs`), and every
+  dialect's identifier-quoting and parameter-placeholder style (`crates/elm-connectors/src/
+  dialect.rs`: doubled double quotes for PostgreSQL/Oracle, doubled backticks for MySQL, doubled
+  closing brackets for SQL Server; `$n`/`?`/`?`/`:n` parameters respectively). All matched
+  exactly. Also read `README.md`'s "Production precautions" section specifically; its claims
+  (non-production destination advisory, fail-closed lossy conversions and staging privileges,
+  key-bounded resume not being a snapshot) are consistent with already-verified behavior.
+  Found and fixed one real, previously unnoticed inaccuracy: `docs/architecture.md` described
+  "job-scoped spill files" as if they actively let "a connector that advertised LOB spill
+  support" stream oversized values today — but every real connector's `preflight()` reports
+  `supports_lob_spill: false` (confirmed by reading all five), so `elm-engine::SpillStore` is
+  dead code in the current alpha, exactly as `docs/connectors.md` already stated honestly
+  elsewhere. `docs/architecture.md` just hadn't been updated to match when that was fixed.
+  Reworded to state plainly that `SpillStore` exists but isn't wired into any connector, and
+  pointed to `docs/connectors.md` for the per-connector detail. Also tightened the memory-permit
+  sentence, which described the 2x reserve as mask-specific when the source
+  (`self.spec.masks.is_empty() && self.spec.conversions.is_empty()`) triggers it for either
+  masking or conversion. Not exhaustive — this pass verified specific technical claims, not
+  every sentence in either document, and did not re-review `docs/connectors.md` or
+  `docs/operations.md` beyond the prior pass's sample.
 - [x] Audit clean-break cutover and remaining legacy assets/configuration references; no Python application shim.
   Clean result (2026-09-16): the only tracked Python file anywhere in the repo is
   `benchmarks/installed_elm_performance.py`, the intentional ELM 1.0.5 comparison script
