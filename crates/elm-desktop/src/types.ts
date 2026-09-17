@@ -91,6 +91,12 @@ export interface Environment {
   updated_at: string;
 }
 
+export interface NativeClientStatus {
+  kind: Environment["kind"];
+  present: boolean;
+  provisionable: boolean;
+}
+
 export interface EnvironmentDraft {
   id?: string;
   name: string;

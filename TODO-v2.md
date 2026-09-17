@@ -1,6 +1,6 @@
 # ELM Tool v2 release to-do
 
-Status: alpha. Updated 2026-09-17. Check boxes represent verified evidence, not planned support.
+Status: alpha. Updated 2026-09-18. Check boxes represent verified evidence, not planned support.
 Oracle existing-table REPLACE uses the explicitly approved **non-atomic table swap**; never label it atomic.
 
 ## 1. Cross-database correctness — first implementation priority
@@ -396,6 +396,55 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
   Oracle native-Windows acceptance (both need their proprietary clients/drivers installed, which
   this host doesn't have and installing wasn't requested); macOS and Linux native (non-Docker)
   acceptance; and ODBC setup-failure scenarios specifically.
+
+  Follow-up on 2026-09-17-18: this session tried installing ODBC Driver 18 via `winget` to close
+  the gap above, and it hung for ~20 minutes with no progress before failing — a real, product-
+  relevant pain point, not just friction in this session. The user then set explicit product
+  direction: ELM should not depend on the operator separately sourcing and installing native
+  database drivers; ELM should install what it needs itself, only with the user's confirmation
+  first (both for Oracle, which needs none of its own, and for SQL Server, which needs one
+  Windows UAC prompt neither ELM nor the user can skip). Implemented as a new, real capability
+  rather than left as a plan:
+  - `ErrorCode`/`ElmError::NativeClientMissing` (`crates/elm-core/src/error.rs`) replaces the
+    generic `Unsupported` every "Oracle client not loaded" / "SQL Server driver not registered"
+    call site used to return, so a client can tell "needs provisioning" apart from a dead end.
+  - `Operation::NativeClientStatus` / `Operation::ProvisionNativeClient(DatabaseKind)`
+    (`crates/elm-core/src/protocol.rs`) are new IPC operations. The daemon
+    (`crates/elm-daemon/src/runtime.rs`) never sends `ProvisionNativeClient` itself and never
+    provisions anything from any other operation — only an explicit request triggers it, and the
+    CLI/desktop are responsible for confirming with the user first.
+  - `crates/elm-connectors/src/native_provisioning.rs` (new `native-client-provisioning` feature,
+    Windows-only) does the actual work. Oracle Instant Client Basic is downloaded, SHA-256
+    checked against a pinned value, and extracted directly next to the running `elm-daemon`
+    executable — Windows checks an application's own directory before `PATH`, so this needs no
+    environment-variable mutation and no elevation. This mattered concretely: this workspace's
+    `unsafe_code = "forbid"` lint (a deliberate, hard, workspace-wide rule) ruled out the first
+    design, which mutated the process's own `PATH`/`LD_LIBRARY_PATH` via `std::env::set_var`
+    (unsafe since Rust 1.82); dropping files next to the executable needed no unsafe code at all
+    once found. SQL Server's ODBC Driver 18 MSI is downloaded and hash-checked the same way, then
+    run elevated via `Start-Process -Verb RunAs -Wait` (a safe subprocess call, not raw
+    `ShellExecuteW` FFI, which would also have needed `unsafe`) with the driver's documented
+    `IACCEPTMSODBCSQLLICENSETERMS=YES /quiet /norestart` silent-install properties.
+  - `elm native status` / `elm native install <oracle|sql-server> [--yes]` (`crates/elm-cli/src/
+    main.rs`) and the desktop Settings screen's new "Native drivers" panel
+    (`crates/elm-desktop/src/App.tsx`, `src-tauri/src/lib.rs`) are the two confirmation surfaces:
+    neither downloads anything without the user answering a prompt first (CLI: interactive y/N
+    unless `--yes`; desktop: `window.confirm`), matching the user's explicit "always ask first,
+    for both" direction.
+  Live-tested on 2026-09-17: the Oracle path end-to-end for real —
+  `crates/elm-connectors/tests/native_provisioning.rs` downloads the actual ~90 MB pinned archive,
+  verifies its hash, extracts it next to the test binary, and confirms `oracle::Version::client()`
+  succeeds afterward (it didn't before). The SQL Server MSI's silent-install property was verified
+  directly with `msiexec` outside the elevation wrapper: it failed only with "this user must be an
+  administrator," proving the command syntax is right and the only missing piece was the
+  elevation this session's non-interactive shell can't grant itself. `cargo fmt --all -- --check`,
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace
+  --all-features` (0 failures), `cargo deny check` (advisories/bans/licenses/sources all ok after
+  adding `reqwest`/`sha2`/`zip`), and `npm run build` all pass. **Not done**: the SQL Server
+  elevated-install path's actual UAC consent step is unverified end-to-end (no interactive
+  desktop in this session to click "Yes"); macOS/Linux self-provisioning isn't implemented
+  (`is_provisionable` reports this honestly rather than pretending); and none of the new desktop
+  UI was exercised through an actual running GUI window.
 - [ ] Verify TLS/certificate validation and credentials containing URL metacharacters.
   Partial pass on 2026-09-17. Investigated credential/metacharacter handling first: PostgreSQL
   and MySQL pass passwords straight into `tokio_postgres::Config`/`mysql_async::OptsBuilder`

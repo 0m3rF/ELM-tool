@@ -45,6 +45,28 @@ enum Command {
         #[command(subcommand)]
         command: JobsCommand,
     },
+    Native {
+        #[command(subcommand)]
+        command: NativeCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum NativeCommand {
+    /// Reports which native database clients (Oracle Instant Client, SQL Server's ODBC driver)
+    /// this daemon can currently use. Never downloads or installs anything.
+    Status,
+    /// Downloads and installs the native client for a database kind, after asking for
+    /// confirmation. Only Oracle and SQL Server have anything to provision.
+    Install {
+        #[arg(value_enum)]
+        kind: DatabaseArgument,
+        #[arg(
+            long,
+            help = "Skip the confirmation prompt (still subject to any OS-level elevation prompt)"
+        )]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -408,6 +430,7 @@ async fn handle_command(command: Command, client: &DaemonClient, json: bool) -> 
         Command::Mask { command } => handle_mask(command, client, json).await,
         Command::Copy { command } => handle_copy(command, client, json).await,
         Command::Jobs { command } => handle_jobs(command, client, json).await,
+        Command::Native { command } => handle_native(command, client, json).await,
         Command::Daemon { .. } => Err(anyhow::anyhow!(
             "daemon command reached the auto-start dispatcher unexpectedly"
         )),
@@ -731,6 +754,40 @@ async fn handle_jobs(
     }
 }
 
+async fn handle_native(
+    command: NativeCommand,
+    client: &DaemonClient,
+    json: bool,
+) -> anyhow::Result<()> {
+    match command {
+        NativeCommand::Status => {
+            print_response(client.request(Operation::NativeClientStatus).await?, json)
+        }
+        NativeCommand::Install { kind, yes } => {
+            let kind: DatabaseKind = kind.into();
+            if !yes {
+                eprint!(
+                    "ELM will download and install the native client for {kind}. Continue? [y/N] "
+                );
+                use std::io::Write;
+                std::io::stderr().flush()?;
+                let mut answer = String::new();
+                std::io::stdin().read_line(&mut answer)?;
+                if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+                    eprintln!("Cancelled; nothing was downloaded or installed.");
+                    return Ok(());
+                }
+            }
+            print_response(
+                client
+                    .request(Operation::ProvisionNativeClient(kind))
+                    .await?,
+                json,
+            )
+        }
+    }
+}
+
 async fn watch_job(client: &DaemonClient, id: JobId, json: bool) -> anyhow::Result<()> {
     let mut responses = client.watch(Operation::JobWatch(id)).await?;
     while let Some(response) = responses.recv().await {
@@ -904,6 +961,18 @@ fn print_response(response: Response, json: bool) -> anyhow::Result<()> {
                 println!("unsafe: {error}");
             } else {
                 println!("publication is safe for the requested write mode and consistency");
+            }
+        }
+        Response::NativeClientStatuses(statuses) => {
+            for status in statuses {
+                let state = if status.present {
+                    "installed"
+                } else if status.provisionable {
+                    "missing (run 'elm native install' to provision it)"
+                } else {
+                    "missing (no automated installer on this platform yet)"
+                };
+                println!("{}\t{state}", status.kind);
             }
         }
     }

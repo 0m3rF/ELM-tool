@@ -175,7 +175,9 @@ fn worker(
     if cancelled.load(Ordering::Acquire) {
         return Err(ElmError::Cancelled);
     }
-    oracle::Version::client().map_err(|_| ElmError::Unsupported("Oracle Instant Client could not be loaded; install Basic for this architecture and configure the native library loader".into()))?;
+    oracle::Version::client().map_err(|_| {
+        ElmError::NativeClientMissing("Oracle Instant Client is not installed".into())
+    })?;
     let connection = oracle::Connection::connect(username, password.expose_secret(), descriptor)
         .map_err(|_| source_error())?;
     connection
@@ -557,9 +559,7 @@ fn resolve_oracle_identity_blocking(
     database: &str,
 ) -> Result<Option<crate::physical_identity::PhysicalIdentity>> {
     oracle::Version::client().map_err(|_| {
-        ElmError::Unsupported(
-            "Oracle Instant Client could not be loaded; install Basic for this architecture and configure the native library loader".into(),
-        )
+        ElmError::NativeClientMissing("Oracle Instant Client is not installed".into())
     })?;
     let connection = oracle::Connection::connect(username, password.expose_secret(), descriptor)
         .map_err(|_| oracle_identity_error())?;

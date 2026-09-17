@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { invoke, Channel } from "@tauri-apps/api/core";
-import type { Environment, EnvironmentDraft, FileFormat, JobProgress, JobRecord, JobSpec, MaskRule, RuntimeSettings, SinkSpec, SourceSpec, TransferPreview } from "./types";
+import type { Environment, EnvironmentDraft, FileFormat, JobProgress, JobRecord, JobSpec, MaskRule, NativeClientStatus, RuntimeSettings, SinkSpec, SourceSpec, TransferPreview } from "./types";
 import { filterJobs, findDuplicateMaskColumns, isActiveJobState, parseRelation } from "./logic";
 
 type Screen = "connections" | "transfer" | "jobs" | "masks" | "settings";
@@ -385,20 +385,54 @@ function Masks() {
   </section>;
 }
 
+const NATIVE_CLIENT_LABELS: Record<string, string> = {
+  oracle: "Oracle Instant Client",
+  sql_server: "SQL Server's ODBC Driver 18",
+};
+
 function Settings() {
   const mib = 1024 * 1024;
   const [settings, setSettings] = useState<RuntimeSettings>({ memory_budget_bytes: 512 * mib, batch_target_bytes: 16 * mib });
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [nativeClients, setNativeClients] = useState<NativeClientStatus[]>([]);
+  const [nativeError, setNativeError] = useState("");
+  const [provisioning, setProvisioning] = useState<string>();
   useEffect(() => { void invoke<RuntimeSettings>("get_settings").then(setSettings).catch((value) => setError(String(value))); }, []);
+  const loadNativeClients = useCallback(() => {
+    void invoke<NativeClientStatus[]>("native_client_status").then(setNativeClients).catch((value) => setNativeError(String(value)));
+  }, []);
+  useEffect(loadNativeClients, [loadNativeClients]);
   const save = async (event: FormEvent) => {
     event.preventDefault(); setError(""); setMessage("");
     try { setSettings(await invoke<RuntimeSettings>("save_settings", { settings })); setMessage("Runtime settings saved."); }
     catch (value) { setError(String(value)); }
   };
+  const installNativeClient = async (status: NativeClientStatus) => {
+    const label = NATIVE_CLIENT_LABELS[status.kind] ?? status.kind;
+    const uacNote = status.kind === "sql_server" ? " Windows will separately ask you to approve this with its own elevation (UAC) prompt." : "";
+    if (!window.confirm(`Download and install ${label} now?${uacNote}`)) return;
+    setNativeError(""); setProvisioning(status.kind);
+    try { await invoke("provision_native_client", { kind: status.kind }); loadNativeClients(); }
+    catch (value) { setNativeError(String(value)); }
+    finally { setProvisioning(undefined); }
+  };
   return <section><Header eyebrow="Runtime" title="Settings" detail="Tune bounded resource use without weakening consistency." />
     {error && <div role="alert" className="alert">{error}</div>}
     {message && <div role="status" className="success">{message}</div>}
-    <form className="panel settings" onSubmit={save}><label>Process memory budget <span>{settings.memory_budget_bytes / mib} MiB</span><input type="range" min="128" max="2048" step="64" value={settings.memory_budget_bytes / mib} onChange={(event) => setSettings({ ...settings, memory_budget_bytes: Number(event.target.value) * mib })} /></label><label>Target batch size<select value={settings.batch_target_bytes / mib} onChange={(event) => setSettings({ ...settings, batch_target_bytes: Number(event.target.value) * mib })}><option value="8">8 MiB</option><option value="16">16 MiB</option><option value="32">32 MiB</option></select></label><div className="callout"><strong>Native prerequisites</strong><p>Oracle requires Instant Client. SQL Server requires Microsoft ODBC Driver 18. Live driver probes will activate with the native database backends.</p></div><div className="footer-actions"><button className="primary" type="submit">Save settings</button></div></form>
+    <form className="panel settings" onSubmit={save}><label>Process memory budget <span>{settings.memory_budget_bytes / mib} MiB</span><input type="range" min="128" max="2048" step="64" value={settings.memory_budget_bytes / mib} onChange={(event) => setSettings({ ...settings, memory_budget_bytes: Number(event.target.value) * mib })} /></label><label>Target batch size<select value={settings.batch_target_bytes / mib} onChange={(event) => setSettings({ ...settings, batch_target_bytes: Number(event.target.value) * mib })}><option value="8">8 MiB</option><option value="16">16 MiB</option><option value="32">32 MiB</option></select></label>
+      <div className="callout wide">
+        <strong>Native drivers</strong>
+        <p>Oracle and SQL Server need a vendor client ELM can't bundle for licensing reasons. ELM can download and install them itself &mdash; nothing happens until you approve it here.</p>
+        {nativeError && <div role="alert" className="alert">{nativeError}</div>}
+        {nativeClients.map((status) => <div className="native-client-row" key={status.kind}>
+          <span>{NATIVE_CLIENT_LABELS[status.kind] ?? status.kind}</span>
+          <span className={`state ${status.present ? "succeeded" : "failed"}`}>{status.present ? "installed" : "not installed"}</span>
+          {!status.present && (status.provisionable
+            ? <button type="button" disabled={provisioning === status.kind} onClick={() => void installNativeClient(status)}>{provisioning === status.kind ? "Installing…" : "Install"}</button>
+            : <small>No automated installer on this platform yet; install it manually.</small>)}
+        </div>)}
+      </div>
+      <div className="footer-actions"><button className="primary" type="submit">Save settings</button></div></form>
   </section>;
 }

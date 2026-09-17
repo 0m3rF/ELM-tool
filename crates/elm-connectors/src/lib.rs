@@ -17,6 +17,7 @@ pub mod oracle_sink;
 pub mod oracle_source;
 #[cfg(feature = "sql-server")]
 pub use native_diagnostics::test_sql_server_environment;
+pub mod native_provisioning;
 pub mod physical_identity;
 #[cfg(feature = "postgresql")]
 pub mod postgresql;

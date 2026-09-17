@@ -124,9 +124,9 @@ pub(crate) fn sql_server_manager() -> Result<odbc_api::Environment> {
         .iter()
         .any(|driver| driver.description == SQL_SERVER_DRIVER)
     {
-        return Err(ElmError::Unsupported(
-                "Microsoft ODBC Driver 18 for SQL Server is missing for this process architecture. Install and register it; Linux/macOS also require unixODBC".into(),
-            ));
+        return Err(ElmError::NativeClientMissing(
+            "Microsoft ODBC Driver 18 for SQL Server is not installed".into(),
+        ));
     }
     Ok(manager)
 }
@@ -162,15 +162,19 @@ pub async fn test_oracle_environment(environment: &Environment, password: &str) 
     let username = environment.username.clone();
     let password = SecretString::from(password.to_owned());
     tokio::task::spawn_blocking(move || {
-        oracle::Version::client().map_err(|_| ElmError::Unsupported(
-            "Oracle Instant Client could not be loaded. Install Basic for this process architecture and configure PATH on Windows or the native library loader on Linux/macOS".into(),
-        ))?;
-        let connection = oracle::Connection::connect(&username, password.expose_secret(), &descriptor)
-            .map_err(|_| connection_error("Oracle"))?;
-        connection.set_call_timeout(Some(timeout))
+        oracle::Version::client().map_err(|_| {
+            ElmError::NativeClientMissing("Oracle Instant Client is not installed".into())
+        })?;
+        let connection =
+            oracle::Connection::connect(&username, password.expose_secret(), &descriptor)
+                .map_err(|_| connection_error("Oracle"))?;
+        connection
+            .set_call_timeout(Some(timeout))
             .map_err(|_| connection_error("Oracle"))?;
         connection.ping().map_err(|_| connection_error("Oracle"))
-    }).await.map_err(|_| ElmError::Internal("Oracle diagnostic worker stopped".into()))?
+    })
+    .await
+    .map_err(|_| ElmError::Internal("Oracle diagnostic worker stopped".into()))?
 }
 
 #[cfg(test)]

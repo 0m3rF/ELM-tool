@@ -286,6 +286,63 @@ impl DaemonRuntime {
             Operation::JobWatch(_) => Err(ElmError::Internal(
                 "job.watch must be dispatched as a streaming request".into(),
             )),
+            Operation::NativeClientStatus => Ok(Response::NativeClientStatuses(vec![
+                self.native_client_status(DatabaseKind::Oracle),
+                self.native_client_status(DatabaseKind::SqlServer),
+            ])),
+            Operation::ProvisionNativeClient(kind) => self.provision_native_client(kind).await,
+        }
+    }
+
+    fn native_client_status(&self, kind: DatabaseKind) -> elm_core::protocol::NativeClientStatus {
+        let present = match kind {
+            DatabaseKind::Oracle => {
+                elm_connectors::native_provisioning::oracle_instant_client_present()
+            }
+            DatabaseKind::SqlServer => {
+                elm_connectors::native_provisioning::sql_server_odbc_driver_present()
+            }
+            DatabaseKind::PostgreSql | DatabaseKind::MySql => true,
+        };
+        elm_core::protocol::NativeClientStatus {
+            kind,
+            present,
+            provisionable: elm_connectors::native_provisioning::is_provisionable(kind),
+        }
+    }
+
+    /// Only ever reached from an explicit `Operation::ProvisionNativeClient` request: the CLI
+    /// and desktop are responsible for obtaining the user's confirmation before sending it, so
+    /// nothing on the daemon's own initiative ever downloads or installs anything.
+    async fn provision_native_client(&self, kind: DatabaseKind) -> Result<Response> {
+        if !elm_connectors::native_provisioning::is_provisionable(kind) {
+            return Err(ElmError::Unsupported(format!(
+                "{kind} has no automated native-client installer on this platform yet"
+            )));
+        }
+        #[cfg(target_os = "windows")]
+        {
+            match kind {
+                DatabaseKind::Oracle => {
+                    elm_connectors::native_provisioning::provision_oracle_instant_client().await?;
+                }
+                DatabaseKind::SqlServer => {
+                    let staging = self.paths.data_directory.join("native");
+                    elm_connectors::native_provisioning::provision_sql_server_odbc_driver(&staging)
+                        .await?;
+                }
+                DatabaseKind::PostgreSql | DatabaseKind::MySql => {
+                    return Err(ElmError::Unsupported(format!(
+                        "{kind} does not use a native client"
+                    )));
+                }
+            }
+            Ok(Response::Ack)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = kind;
+            unreachable!("is_provisionable already returned false on this platform above")
         }
     }
 

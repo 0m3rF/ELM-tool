@@ -14,6 +14,7 @@ pub enum ErrorCode {
     NotFound,
     Conflict,
     Unsupported,
+    NativeClientMissing,
     PermissionDenied,
     Connection,
     TypeMapping,
@@ -46,6 +47,13 @@ pub enum ElmError {
     Conflict(String),
     #[error("unsupported operation: {0}")]
     Unsupported(String),
+    /// The native client library/driver this connector needs isn't installed. Distinct from
+    /// `Unsupported` so a client can offer to provision it (`Operation::ProvisionNativeClient`)
+    /// instead of just reporting a dead end. Carries a plain message, like its siblings here,
+    /// because `PublicError` erases everything but the error code and message across IPC; the
+    /// caller already knows which `DatabaseKind` it was testing when it gets this back.
+    #[error("native client missing: {0}")]
+    NativeClientMissing(String),
     #[error("permission denied: {0}")]
     PermissionDenied(String),
     #[error("connection failed: {message}")]
@@ -75,6 +83,7 @@ impl ElmError {
             Self::NotFound(_) => ErrorCode::NotFound,
             Self::Conflict(_) => ErrorCode::Conflict,
             Self::Unsupported(_) => ErrorCode::Unsupported,
+            Self::NativeClientMissing(_) => ErrorCode::NativeClientMissing,
             Self::PermissionDenied(_) => ErrorCode::PermissionDenied,
             Self::Connection { .. } => ErrorCode::Connection,
             Self::TypeMapping(_) => ErrorCode::TypeMapping,
@@ -113,6 +122,11 @@ impl ElmError {
 
 fn remediation(error: &ElmError) -> Option<&'static str> {
     match error {
+        ElmError::NativeClientMissing(_) => Some(
+            "Run 'elm native install <oracle|sql-server>' (CLI) or use the Settings screen's \
+             native drivers panel (desktop) to install it; ELM asks for confirmation before \
+             downloading or installing anything.",
+        ),
         ElmError::PermissionDenied(_) => Some(
             "Grant staging-table create/drop privileges or explicitly choose checkpointed consistency.",
         ),

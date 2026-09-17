@@ -119,6 +119,7 @@ fn decode_response(line: &str) -> Result<Response> {
         elm_core::ErrorCode::NotFound => ElmError::NotFound(error.message),
         elm_core::ErrorCode::Conflict => ElmError::Conflict(error.message),
         elm_core::ErrorCode::Unsupported => ElmError::Unsupported(error.message),
+        elm_core::ErrorCode::NativeClientMissing => ElmError::NativeClientMissing(error.message),
         elm_core::ErrorCode::PermissionDenied => ElmError::PermissionDenied(error.message),
         elm_core::ErrorCode::Connection => ElmError::Connection {
             message: error.message,

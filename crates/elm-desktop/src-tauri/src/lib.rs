@@ -186,6 +186,40 @@ async fn test_environment(state: State<'_, DesktopState>, id: String) -> Result<
 }
 
 #[tauri::command]
+async fn native_client_status(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<elm_core::protocol::NativeClientStatus>, String> {
+    match state
+        .client
+        .request(Operation::NativeClientStatus)
+        .await
+        .map_err(public_message)?
+    {
+        Response::NativeClientStatuses(value) => Ok(value),
+        _ => Err("daemon returned an unexpected response".into()),
+    }
+}
+
+/// The frontend is responsible for confirming with the user before calling this -- it always
+/// downloads and installs (Oracle: silently, no elevation; SQL Server: through a single Windows
+/// UAC prompt neither ELM nor this command can skip) as soon as it's invoked.
+#[tauri::command]
+async fn provision_native_client(
+    state: State<'_, DesktopState>,
+    kind: DatabaseKind,
+) -> Result<(), String> {
+    match state
+        .client
+        .request(Operation::ProvisionNativeClient(kind))
+        .await
+        .map_err(public_message)?
+    {
+        Response::Ack => Ok(()),
+        _ => Err("daemon returned an unexpected response".into()),
+    }
+}
+
+#[tauri::command]
 async fn remove_environment(state: State<'_, DesktopState>, id: String) -> Result<(), String> {
     let id = EnvironmentId::from_str(&id).map_err(|_| "invalid environment id")?;
     let environment = find_environment(&state.client, id).await?;
@@ -434,6 +468,8 @@ pub fn run() {
                 list_environments,
                 save_environment,
                 test_environment,
+                native_client_status,
+                provision_native_client,
                 remove_environment,
                 list_masks,
                 save_mask,

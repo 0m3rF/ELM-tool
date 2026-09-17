@@ -117,7 +117,13 @@ The PostgreSQL backend uses the native Rust protocol and binary COPY. TLS is req
 the host and certificate chain by default; an optional PEM root can be configured for private CAs.
 Plaintext transport requires explicit `ssl_mode=disable`. The MySQL backend also uses a native Rust
 client with verified TLS by default. SQL Server requires Microsoft ODBC Driver 18, and Oracle
-requires Oracle Instant Client; proprietary drivers are not bundled. Consult
+requires Oracle Instant Client; ELM does not bundle these proprietary clients, but on Windows it
+can install them itself after you confirm: `elm native status` reports what's installed, and
+`elm native install <oracle|sql-server>` (or the desktop's Settings screen) downloads and installs
+one, verifying its SHA-256 against a pinned value first. Oracle needs no elevation (its files are
+placed next to `elm-daemon`, which Windows checks before `PATH`); SQL Server's driver registers
+itself with the OS, so installing it triggers one Windows UAC elevation prompt you approve
+separately. macOS/Linux don't have this automation yet and still need a manual install. Consult
 [the connector matrix](docs/connectors.md) for the current type and recovery boundaries.
 Linux/macOS installations also require unixODBC for the daemon's native diagnostics. SQL Server
 and Oracle connection tests report missing clients before login and run native calls on blocking

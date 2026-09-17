@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    Environment, EnvironmentId, JobId, JobProgress, JobRecord, JobSpec, MaskRule, MaskRuleId,
-    PublicError, RuntimeSettings, TransferPreview,
+    DatabaseKind, Environment, EnvironmentId, JobId, JobProgress, JobRecord, JobSpec, MaskRule,
+    MaskRuleId, PublicError, RuntimeSettings, TransferPreview,
 };
 
 pub const IPC_PROTOCOL_VERSION: u16 = 1;
@@ -75,6 +75,25 @@ pub enum Operation {
     JobResume(JobId),
     #[serde(rename = "job.delete")]
     JobDelete(JobId),
+    /// Reports which native database clients (Oracle Instant Client, SQL Server's ODBC driver)
+    /// are currently usable by this daemon process. Never downloads or installs anything.
+    #[serde(rename = "native_client.status")]
+    NativeClientStatus,
+    /// Downloads and installs the native client for `DatabaseKind`. The caller must have already
+    /// obtained the user's explicit confirmation before sending this — the daemon never prompts
+    /// on its own and never provisions anything from any other operation.
+    #[serde(rename = "native_client.provision")]
+    ProvisionNativeClient(DatabaseKind),
+}
+
+/// One row of `Response::NativeClientStatuses`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct NativeClientStatus {
+    pub kind: DatabaseKind,
+    pub present: bool,
+    /// True when ELM can provision this client itself (with the caller's confirmation) rather
+    /// than requiring the user to install it manually outside ELM.
+    pub provisionable: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,4 +117,5 @@ pub enum Response {
     Jobs(Vec<JobRecord>),
     Event(JobProgress),
     Preview(TransferPreview),
+    NativeClientStatuses(Vec<NativeClientStatus>),
 }

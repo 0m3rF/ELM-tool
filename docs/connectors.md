@@ -252,10 +252,41 @@ resolving to the same server, and correct rejection of unrelated and missing rel
 ## Native prerequisite diagnostics
 
 - Windows SQL Server: install Microsoft ODBC Driver 18 and confirm it appears in the ODBC Data
-  Sources driver list.
+  Sources driver list, or run `elm native install sql-server` (below) to have ELM do it.
 - Linux/macOS SQL Server: install `msodbcsql18` plus unixODBC and ensure the driver is registered.
-- Oracle: install a supported Instant Client Basic package. On Windows place its directory on PATH;
-  on Linux configure the dynamic loader; on macOS follow Oracle's signed-library guidance.
+- Oracle: install a supported Instant Client Basic package. On Windows place its directory on PATH,
+  or run `elm native install oracle` (below); on Linux configure the dynamic loader; on macOS
+  follow Oracle's signed-library guidance.
+
+### Windows self-provisioning
+
+`Operation::NativeClientStatus`/`ProvisionNativeClient` (CLI: `elm native status` / `elm native
+install <oracle|sql-server>`; desktop: Settings screen's "Native drivers" panel) let ELM install
+these itself on Windows, only after the caller has confirmed it — the daemon never downloads or
+installs anything on its own initiative from any other operation.
+
+- Oracle Instant Client Basic is downloaded, its SHA-256 checked against a pinned value, and
+  extracted directly into the running `elm-daemon`'s own directory: Windows checks an
+  application's own directory before `PATH` when resolving an implicit library load, so this
+  needs no environment-variable mutation (this workspace forbids `unsafe` code, which
+  `std::env::set_var` requires) and no elevation. If that directory isn't writable (a per-machine
+  install under `Program Files`, say) it fails closed with a clear `PermissionDenied` before
+  downloading anything, rather than trying something riskier.
+- SQL Server's ODBC Driver 18 MSI is downloaded and SHA-256 checked the same way, then run
+  elevated through `Start-Process -Verb RunAs -Wait` with the driver's documented
+  `IACCEPTMSODBCSQLLICENSETERMS=YES /quiet /norestart` silent-install properties — a single
+  Windows UAC consent prompt neither ELM nor this command can skip or pre-answer, since the
+  driver registers itself with the OS driver manager and genuinely can't be "just files in a
+  folder" the way Oracle's client can.
+
+Live-tested on 2026-09-17: the Oracle path end-to-end (real download, hash verification,
+extraction next to a test binary, and `oracle::Version::client()` succeeding afterward — see
+`crates/elm-connectors/tests/native_provisioning.rs`). The SQL Server path's download and MSI
+silent-install property were verified directly with `msiexec` (it failed only on "this user must
+be an administrator," confirming the elevation requirement, not a syntax problem); the UAC
+consent step itself is unverified in an automated session with no interactive desktop to approve
+it. macOS/Linux self-provisioning isn't implemented yet; `is_provisionable` reports that plainly
+rather than pretending otherwise.
 
 Connection testing checks the registered SQL Server Driver 18 or loads Oracle Instant Client before
 attempting a login. Native calls run on blocking workers. SQL Server sets a 15-second login timeout;
