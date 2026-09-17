@@ -1,5 +1,18 @@
 import type { JobRecord, JobState, MaskRule, Relation } from "./types";
 
+/** States a job can still be moving through; `job.watch` is only worth opening for these. */
+export const ACTIVE_JOB_STATES: readonly JobState[] = [
+  "queued",
+  "preflighting",
+  "running",
+  "publishing",
+  "cancelling",
+];
+
+export function isActiveJobState(state: JobState): boolean {
+  return (ACTIVE_JOB_STATES as readonly string[]).includes(state);
+}
+
 export function parseRelation(value: string): Relation {
   const parts = value.split(".").map((part) => part.trim());
   if (parts.some((part) => !part)) throw new Error("Relation must use non-empty name components.");

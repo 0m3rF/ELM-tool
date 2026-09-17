@@ -254,8 +254,32 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
   pass (`npm run test`); `npm run build` still passes and produces an identical-size bundle,
   confirming the test file isn't swept into the shipped app. **Still not done**: this is unit
   coverage of the logic, not of rendering or user interaction — no test opens the Jobs screen,
-  types into the filter input, or clicks a checkbox, and live-progress rendering/accessibility
-  through an actual GUI window remain unverified for the reason stated above.
+  types into the filter input, or clicks a checkbox, and accessibility through an actual GUI
+  window remains unverified for the reason stated above.
+
+  Follow-up on 2026-09-17, investigating "live-progress rendering": found a real, previously
+  unnoticed bug rather than just a test gap. The Jobs screen's `<progress>` bar
+  (`crates/elm-desktop/src/App.tsx`) was hardcoded to `value={state === "succeeded" ? 100 :
+  state === "running" ? 55 : 10}` — a fabricated number derived only from coarse state, never
+  from the real `rows`/`bytes` a running job had actually moved. A job 95% through a transfer and
+  one that had just started both showed exactly 55%. Confirmed there's no way to compute a real
+  percentage today: `JobProgress` (`crates/elm-core/src/types.rs`) carries no total-rows or
+  total-bytes field, and its one field that could imply a completion estimate, `eta: Option
+  <Duration>`, is unconditionally `None` everywhere it's set (`elm-engine/src/pipeline.rs`,
+  `elm-daemon/src/runtime.rs` — grepped for every assignment). So a real percentage isn't
+  knowable yet, and showing one anyway is actively misleading. Fixed by making the bar honest
+  instead of inventing a fix for data that doesn't exist: a succeeded job shows a full
+  `value="100"` bar; any other active state (`queued`/`preflighting`/`running`/`publishing`/
+  `cancelling`) shows a native indeterminate `<progress>` (no `value` attribute, which renders as
+  an animated bar rather than a fixed position) labeled "exact completion percentage isn't
+  tracked yet"; a terminal non-success state (`failed`/`cancelled`/`interrupted`) shows no bar at
+  all. The real per-second row/byte counters next to it were already accurate and are unchanged.
+  Also deduplicated the active-state list into `isActiveJobState`/`ACTIVE_JOB_STATES` in
+  `logic.ts` (it previously existed twice, once inline for the `job.watch` subscription effect
+  and once — inconsistently, as three of five states — inline in the progress-bar condition) and
+  added `logic.test.ts` coverage for it. `npm run test` (21 cases) and `npm run build` pass.
+  **Still not done**: not exercised through an actual GUI window; a real total-rows/percentage
+  field would need daemon/engine changes and is a separate, larger feature this fix didn't add.
 - [ ] Verify masking configuration and deterministic retry/resume behavior through the UI.
   Verification found a real, product-level gap on 2026-09-17, not just a test gap: masking rules
   could be created, edited, tested, and removed (CRUD), but **no client ever attached a saved

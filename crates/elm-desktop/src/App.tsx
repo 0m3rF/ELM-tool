@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { invoke, Channel } from "@tauri-apps/api/core";
 import type { Environment, EnvironmentDraft, FileFormat, JobProgress, JobRecord, JobSpec, MaskRule, RuntimeSettings, SinkSpec, SourceSpec, TransferPreview } from "./types";
-import { filterJobs, findDuplicateMaskColumns, parseRelation } from "./logic";
+import { filterJobs, findDuplicateMaskColumns, isActiveJobState, parseRelation } from "./logic";
 
 type Screen = "connections" | "transfer" | "jobs" | "masks" | "settings";
 
@@ -276,7 +276,7 @@ function Jobs() {
   }, []);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    const active = jobs.filter((job) => ["queued", "preflighting", "running", "publishing", "cancelling"].includes(job.progress.state));
+    const active = jobs.filter((job) => isActiveJobState(job.progress.state));
     const cleanups = active.map((job) => {
       const channel = new Channel<JobProgress>();
       channel.onmessage = (progress) => setJobs((current) => current.map((entry) => entry.spec.id === job.spec.id ? { ...entry, progress } : entry));
@@ -302,7 +302,11 @@ function Jobs() {
         {filtered.map((job) => <button role="listitem" key={job.spec.id} onClick={() => setSelected(job.spec.id)} className={selected === job.spec.id ? "selected" : ""}>
           <span><strong>{job.spec.name || job.spec.id.slice(0, 8)}</strong><small>{new Date(job.updated_at).toLocaleString()}</small></span>
           <span className={`state ${job.progress.state}`}>{job.progress.state}</span>
-          <progress max="100" value={job.progress.state === "succeeded" ? 100 : job.progress.state === "running" ? 55 : 10} />
+          {job.progress.state === "succeeded"
+            ? <progress max="100" value="100" aria-label="Transfer complete" />
+            : isActiveJobState(job.progress.state)
+              ? <progress aria-label="Transfer in progress; exact completion percentage isn't tracked yet" />
+              : null}
           <small>{job.progress.rows.toLocaleString()} rows · {(job.progress.bytes_per_second / 1048576).toFixed(1)} MiB/s</small>
         </button>)}
         {!filtered.length && <div className="empty"><h2>No matching jobs</h2><p>Submitted transfers that match the filters appear here.</p></div>}

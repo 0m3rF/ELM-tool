@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterJobs, findDuplicateMaskColumns, parseRelation } from "./logic";
+import { filterJobs, findDuplicateMaskColumns, isActiveJobState, parseRelation } from "./logic";
 import type { JobRecord, JobState, MaskRule } from "./types";
 
 function job(id: string, name: string | undefined, state: JobState): JobRecord {
@@ -108,6 +108,18 @@ describe("filterJobs", () => {
 
   it("returns nothing when no job matches", () => {
     expect(filterJobs(jobs, "does-not-exist", "")).toEqual([]);
+  });
+});
+
+describe("isActiveJobState", () => {
+  it("treats queued, preflighting, running, publishing, and cancelling as active", () => {
+    const active: JobState[] = ["queued", "preflighting", "running", "publishing", "cancelling"];
+    for (const state of active) expect(isActiveJobState(state)).toBe(true);
+  });
+
+  it("treats every terminal state as not active", () => {
+    const terminal: JobState[] = ["succeeded", "failed", "cancelled", "interrupted"];
+    for (const state of terminal) expect(isActiveJobState(state)).toBe(false);
   });
 });
 
