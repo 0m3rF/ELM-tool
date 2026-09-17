@@ -397,6 +397,36 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
   this host doesn't have and installing wasn't requested); macOS and Linux native (non-Docker)
   acceptance; and ODBC setup-failure scenarios specifically.
 - [ ] Verify TLS/certificate validation and credentials containing URL metacharacters.
+  Partial pass on 2026-09-17. Investigated credential/metacharacter handling first: PostgreSQL
+  and MySQL pass passwords straight into `tokio_postgres::Config`/`mysql_async::OptsBuilder`
+  typed builders (`.password(...)`/`.pass(...)`), never through a formatted string, so there's no
+  injection surface for either. SQL Server builds a manual `DRIVER={};...;PWD={};...` ODBC
+  string, but `sql_server_connection_string` (`crates/elm-connectors/src/native_diagnostics.rs`)
+  already wraps every field in `{}` and doubles literal `}` characters before interpolating, with
+  an existing unit test (`native_diagnostics.rs`'s connection-string test) that specifically
+  tries to inject `};UID={other` through the username and `};PWD=oops;{` through the password and
+  confirms both are neutralized. Oracle's TNS descriptor interpolates host/port/database, but
+  `validate_endpoint` (same file) restricts `host` to `[a-zA-Z0-9.\-_:\[\]]` before any connector
+  ever builds a descriptor, and the password isn't part of the descriptor string at all — it's
+  passed as a separate typed parameter to the native OCI connect call. All four connectors were
+  already correctly defended against this before this pass; nothing needed fixing.
+
+  TLS certificate verification was the real gap: zero test anywhere connected to a database over
+  TLS and checked that an untrusted certificate is actually rejected — every existing test sets
+  `ssl_mode: disable`. Built a disposable fixture (`tests/tls-postgres/Dockerfile`: `postgres:16`
+  with a self-signed leaf certificate generated fresh at image build time, so it is never in any
+  OS trust store) and `crates/elm-connectors/tests/tls.rs` with two live-tested cases: connecting
+  with `ssl_mode: require` and no `root_certificate` against that fixture fails closed (proving
+  verification is real, not skipped), and connecting with the correct `root_certificate` set
+  succeeds — the only variable between the two is that one PEM path, which is what makes this
+  real evidence rather than a coincidence. Both ran natively on Windows on 2026-09-17 against a
+  live disposable container and passed; the fixture and extracted CA file were torn down
+  afterward. Documented the run recipe in `docs/connectors.md`. Verified with `cargo fmt --all --
+  check` and `cargo clippy --workspace --all-targets --all-features -- -D warnings` (0 warnings).
+  **Not done**: MySQL/SQL Server/Oracle TLS verification itself (as opposed to their credential-
+  handling, checked above) is unverified — this pass only built the PostgreSQL fixture; and
+  credentials containing URL metacharacters were reasoned about from the connection-building code
+  rather than exercised with an actual live login using such a password.
 - [ ] Build and smoke-test standalone CLI/daemon plus Windows installers, macOS DMGs, Linux AppImage/deb.
   Partial pass on 2026-09-17, Windows CLI/daemon binaries only. `cargo build --release -p elm-cli
   -p elm-daemon` produced `elm.exe` (2.3 MB) and `elm-daemon.exe` (28.7 MB); copied both, alone,

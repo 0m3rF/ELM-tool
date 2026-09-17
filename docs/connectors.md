@@ -322,6 +322,22 @@ $env:ELM_TEST_POSTGRES_PASSWORD = "..."
 cargo test -p elm-connectors --features postgresql --test postgresql -- --ignored
 ```
 
+Run the ignored TLS certificate-verification suite (`crates/elm-connectors/tests/tls.rs`) against a
+disposable PostgreSQL fixture whose server certificate is a self-signed leaf never present in any
+OS trust store, proving `ssl_mode=require` performs a real chain check rather than accepting any
+handshake:
+
+```powershell
+docker build -t elm-pg-tls-fixture tests/tls-postgres
+docker run -d --rm --name elm-pg-tls -p 127.0.0.1:55443:5432 `
+  -e POSTGRES_DB=elm_tls_test -e POSTGRES_PASSWORD=elm_tls_only elm-pg-tls-fixture
+docker cp elm-pg-tls:/certs/ca.crt ./elm-tls-ca.crt
+$env:ELM_TEST_TLS_CA_PATH = (Resolve-Path ./elm-tls-ca.crt)
+cargo test -p elm-connectors --features postgresql --test tls -- --ignored
+docker stop elm-pg-tls
+Remove-Item ./elm-tls-ca.crt
+```
+
 Run MySQL tests against an isolated MySQL 8.4 instance (`elm_test`, user `root`). Run serially because
 the fallback test temporarily changes the server-wide LOCAL policy:
 
