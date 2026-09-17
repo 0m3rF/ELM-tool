@@ -7,7 +7,8 @@
     "dev": "vite --port 1420",
     "build": "tsc && vite build",
     "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",
@@ -19,6 +20,7 @@
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^5.0.2",
     "typescript": "^5.9.2",
-    "vite": "^7.1.4"
+    "vite": "^7.1.4",
+    "vitest": "^5.0.1"
   }
 }

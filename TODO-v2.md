@@ -236,6 +236,26 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
   §1); nothing here touched masking-through-the-UI, pause semantics, history *filtering* as a
   UI feature (the desktop's client-side search/state filters in `App.tsx` were not exercised),
   or live-progress rendering/accessibility, and none of it ran against an actual GUI window.
+
+  Follow-up on 2026-09-17, closing the history-filtering gap named above: no GUI automation tool
+  is available for the Tauri desktop app in this environment (checked again — no `tauri-driver`,
+  Edge/Chrome WebDriver, or existing test harness), so building real click-through GUI coverage
+  wasn't attempted as a workaround. Instead, extracted the desktop's filtering and validation
+  logic out of the React components and into a plain module (`crates/elm-desktop/src/logic.ts`:
+  `filterJobs`, `findDuplicateMaskColumns`, `parseRelation`, the last two also lifted out of
+  inline component code from earlier passes) so it's independently testable without a DOM. Added
+  `vitest` as a dev dependency (pinned at 5.0.1 directly — `^3` initially resolved a version with
+  a known moderate `@vitest/mocker` path-traversal advisory; `npm audit` now reports zero
+  vulnerabilities) and `crates/elm-desktop/src/logic.test.ts`: 19 cases covering the Jobs
+  screen's exact filter behavior (name match, id-substring match, case-insensitivity, a nameless
+  job falling back to id matching, state-only filtering, combined query+state filtering, and no
+  match), `parseRelation`'s three accepted forms plus its three rejection cases, and
+  `findDuplicateMaskColumns`'s selected/unselected and single/multiple-conflict cases. All 19
+  pass (`npm run test`); `npm run build` still passes and produces an identical-size bundle,
+  confirming the test file isn't swept into the shipped app. **Still not done**: this is unit
+  coverage of the logic, not of rendering or user interaction — no test opens the Jobs screen,
+  types into the filter input, or clicks a checkbox, and live-progress rendering/accessibility
+  through an actual GUI window remain unverified for the reason stated above.
 - [ ] Verify masking configuration and deterministic retry/resume behavior through the UI.
   Verification found a real, product-level gap on 2026-09-17, not just a test gap: masking rules
   could be created, edited, tested, and removed (CRUD), but **no client ever attached a saved

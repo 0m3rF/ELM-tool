@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { invoke, Channel } from "@tauri-apps/api/core";
-import type { Environment, EnvironmentDraft, FileFormat, JobProgress, JobRecord, JobSpec, MaskRule, Relation, RuntimeSettings, SinkSpec, SourceSpec, TransferPreview } from "./types";
+import type { Environment, EnvironmentDraft, FileFormat, JobProgress, JobRecord, JobSpec, MaskRule, RuntimeSettings, SinkSpec, SourceSpec, TransferPreview } from "./types";
+import { filterJobs, findDuplicateMaskColumns, parseRelation } from "./logic";
 
 type Screen = "connections" | "transfer" | "jobs" | "masks" | "settings";
 
@@ -206,14 +207,10 @@ function NewTransfer({ onSubmitted }: { onSubmitted: () => void }) {
     finally { setSubmitting(false); }
   };
   const reviewed = Boolean(preview) && !preview?.publication_error;
-  const duplicateMaskColumns = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const rule of masks) {
-      if (!selectedMaskIds.has(rule.id)) continue;
-      counts.set(rule.column, (counts.get(rule.column) ?? 0) + 1);
-    }
-    return [...counts.entries()].filter(([, count]) => count > 1).map(([column]) => column);
-  }, [masks, selectedMaskIds]);
+  const duplicateMaskColumns = useMemo(
+    () => findDuplicateMaskColumns(masks, selectedMaskIds),
+    [masks, selectedMaskIds],
+  );
   const hasMaskConflict = duplicateMaskColumns.length > 0;
   return <section>
     <Header eyebrow="Transfer wizard" title="New transfer" detail="Preflight catches unsafe privileges and lossy mappings before data moves." />
@@ -268,15 +265,6 @@ function NewTransfer({ onSubmitted }: { onSubmitted: () => void }) {
   </section>;
 }
 
-function parseRelation(value: string): Relation {
-  const parts = value.split(".").map((part) => part.trim());
-  if (parts.some((part) => !part)) throw new Error("Relation must use non-empty name components.");
-  if (parts.length === 1) return { name: parts[0] };
-  if (parts.length === 2) return { schema: parts[0], name: parts[1] };
-  if (parts.length === 3) return { catalog: parts[0], schema: parts[1], name: parts[2] };
-  throw new Error("Relation must be name, schema.name, or catalog.schema.name.");
-}
-
 function Jobs() {
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [selected, setSelected] = useState<string>();
@@ -298,11 +286,7 @@ function Jobs() {
     return () => cleanups.forEach((cleanup) => cleanup());
   }, [jobs.length]);
   const current = useMemo(() => jobs.find((job) => job.spec.id === selected), [jobs, selected]);
-  const filtered = useMemo(() => jobs.filter((job) => {
-    const search = query.trim().toLocaleLowerCase();
-    const matchesSearch = !search || job.spec.id.toLocaleLowerCase().includes(search) || (job.spec.name ?? "").toLocaleLowerCase().includes(search);
-    return matchesSearch && (!stateFilter || job.progress.state === stateFilter);
-  }), [jobs, query, stateFilter]);
+  const filtered = useMemo(() => filterJobs(jobs, query, stateFilter), [jobs, query, stateFilter]);
   const action = async (id: string, actionName: "cancel" | "resume" | "delete") => {
     if (actionName === "cancel" && !window.confirm("Cancel this transfer? There is no pause: this cannot be resumed afterward, only deleted. Submit a new transfer to retry it.")) return;
     setError("");
