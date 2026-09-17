@@ -361,7 +361,7 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
   outside `cargo deny`'s scope); no proprietary client (Oracle Instant Client, Microsoft ODBC
   Driver 18) is bundled, downloaded, or distributed by any release artifact, matching
   `docs/connectors.md`'s existing "ELM does not bundle or download proprietary clients" claim.
-- [ ] Review documentation: supported mappings, prerequisites, performance presets, recovery, safety modes,
+- [x] Review documentation: supported mappings, prerequisites, performance presets, recovery, safety modes,
   production precautions, and explicit Oracle non-atomic replacement tradeoffs.
   Partial pass on 2026-09-16: cross-checked a sample of specific claims in `docs/connectors.md`
   and `docs/operations.md` against the current source (SQL Server source/sink type lists,
@@ -398,6 +398,27 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
   masking or conversion. Not exhaustive — this pass verified specific technical claims, not
   every sentence in either document, and did not re-review `docs/connectors.md` or
   `docs/operations.md` beyond the prior pass's sample.
+
+  Follow-up on 2026-09-17, closing the remaining gap: did the line-by-line numeric-constant sweep
+  of `docs/connectors.md`'s type-mapping tables the first pass explicitly skipped, against the
+  actual match arms in all four connectors. Confirmed exact matches for: SQL Server sink text
+  4000 UTF-16 units / binary 8000 bytes and its 2 MiB parameter-array buffer limit
+  (`sql_server_sink.rs`); SQL Server source's lossless type list — `TinyInt`→`UInt8`,
+  `Decimal`/`Numeric` precision 1..=38, bounded `Char`/`Varchar`/`Binary`/`Varbinary` ≤8000 —
+  matching the doc's bounded-type list exactly (`sql_server.rs`); Oracle sink NVARCHAR2(2000) /
+  RAW(2000) and the empty-string/binary rejection (`oracle_sink.rs`); Oracle source's 8 MiB Arrow
+  batch cap (`8 * 1024 * 1024` literal in three places) and the "native array reserves at most
+  2 MiB" claim, which isn't a separate literal but falls out exactly from `batch_capacity`'s
+  `row_bytes * 4` conservative reserve against an 8 MiB budget (`oracle_source.rs`); and MySQL's
+  `TINYINT(1)` claim — `MYSQL_TYPE_TINY` maps to `Int8`/`UInt8` unconditionally, with no
+  display-width or `BOOLEAN`-alias special case (`mysql.rs`). Re-read `docs/operations.md` in
+  full; its specific numeric claims (Oracle's 15s/1-300000ms call timeout, the 8/16/32 MiB batch
+  guidance, the 512 MiB default budget) all matched values already verified in the prior two
+  passes, and its recovery/fault-injection narrative is consistent with the tests §1 and §3 cite
+  as evidence. No further inaccuracies found. Checking this line off: every category it names has
+  now had at least one substantive, source-verified pass, even though not literally every prose
+  sentence in every doc was independently re-derived — a truly exhaustive word-by-word audit was
+  never this line's bar, and re-verification should resume if the underlying source changes.
 - [x] Audit clean-break cutover and remaining legacy assets/configuration references; no Python application shim.
   Clean result (2026-09-16): the only tracked Python file anywhere in the repo is
   `benchmarks/installed_elm_performance.py`, the intentional ELM 1.0.5 comparison script
