@@ -1,6 +1,6 @@
 # ELM Tool v2 release to-do
 
-Status: alpha. Updated 2026-09-16. Check boxes represent verified evidence, not planned support.
+Status: alpha. Updated 2026-09-17. Check boxes represent verified evidence, not planned support.
 Oracle existing-table REPLACE uses the explicitly approved **non-atomic table swap**; never label it atomic.
 
 ## 1. Cross-database correctness — first implementation priority
@@ -167,8 +167,102 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
   an actual running GUI window in this session (no GUI automation tool was available), only
   through the daemon/CLI layer and a `tsc`/`vite` build of the frontend.
 - [ ] Test live progress, close/reconnect, cancellation, resume/restart, history filtering, and actionable failures.
+  Partial pass on 2026-09-17, daemon/IPC layer only (the desktop command surface is a thin
+  passthrough to these same operations, but no GUI automation tool was available in this
+  session, so nothing below was exercised through an actual running GUI window).
+  Added `crates/elm-daemon/tests/job_lifecycle.rs`: a real `elm-daemon` OS subprocess (not an
+  in-process task — a single-threaded in-process daemon cannot reliably race a live transfer
+  against a second client) is sent a 150k-row transfer, then cancelled from one `DaemonClient`
+  connection while a different connection watches it; a fresh connection opened afterward
+  ("window reopened") still sees the correct terminal state, and a terminal job can then be
+  deleted and disappears from `job.list`. Extended `crates/elm-daemon/tests/ipc.rs` with a
+  real actionable-failure case (an explicit lossy conversion of an unparseable value) proving
+  `PublicError.remediation` reaches a live watcher and still reads back correctly from
+  `job.list` after a reconnect. Ran the new cancellation test 12 consecutive times to confirm
+  it is not a timing fluke.
+  Found and fixed three real, reproducible bugs surfaced by writing these tests (none were
+  previously covered by any test, native or otherwise):
+  1. `elm-state`'s `record_progress` used a deferred SQLite transaction that reads the job's
+     current state and then writes based on it; under real concurrent writers (a running job's
+     own progress updates racing a `job.cancel`) this produced an immediate "database is
+     locked" even with `busy_timeout` set, because a deferred read-then-upgrade conflict is a
+     different case than the initial-lock-acquisition wait `busy_timeout` covers. Fixed by
+     opening that transaction `Immediate` (`crates/elm-state/src/store.rs`).
+  2. `DaemonRuntime::cancel_job` persisted the `Cancelling` state before flipping the in-memory
+     `CancellationToken`, and `TransferEngine::run` (`crates/elm-engine/src/pipeline.rs`)
+     classified any resulting error as `Failed` unless it was literally `ElmError::Cancelled`.
+     Because `tokio::select!` does not have to prefer a just-ready cancellation branch over an
+     already-buffered batch, one more batch can legitimately be mid-flight when cancellation is
+     requested; its own state write then loses to `Cancelling` and comes back as a state-machine
+     `Conflict`, not `Cancelled` — so a normal, correctly-requested cancellation was being
+     reported to the user as a failed job with a confusing internal error message. Fixed by
+     cancelling the token before the store write, and by having the pipeline capture whether
+     cancellation was already requested before its own unconditional self-cancel-on-any-error
+     and treating that the same as `ElmError::Cancelled`.
+  3. `produce_batches`' call to acquire a memory permit for the next batch was the one blocking
+     point in that loop not raced against cancellation (every other wait in the pipeline is).
+     Reproduced once in 6 runs before the fix (the job never reached a terminal state within
+     30s and the daemon process went idle, not busy); fixed by selecting it against the
+     cancellation token like the loop's other awaits (`crates/elm-engine/src/pipeline.rs`).
+  Verified with the full `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
+  -- -D warnings`, and `cargo test --workspace --all-features` (0 failures) after the fixes.
+  **Not done in this pass**: resume/restart already has separate coverage (`process_restart.rs`,
+  §1); nothing here touched masking-through-the-UI, pause semantics, history *filtering* as a
+  UI feature (the desktop's client-side search/state filters in `App.tsx` were not exercised),
+  or live-progress rendering/accessibility, and none of it ran against an actual GUI window.
 - [ ] Verify masking configuration and deterministic retry/resume behavior through the UI.
-- [ ] Resolve pause semantics and UI behavior; do not advertise unimplemented actions.
+  Verification found a real, product-level gap on 2026-09-17, not just a test gap: masking rules
+  could be created, edited, tested, and removed (CRUD), but **no client ever attached a saved
+  rule to an actual transfer**. `elm-desktop`'s `NewTransfer` hardcoded `masks: []` when building
+  every job spec, and `elm-cli`'s `copy` command did the same — configuring a masking rule had
+  zero effect on any real transfer, in either client. The daemon and engine were never at fault:
+  `Operation::JobSubmit` faithfully applies whatever `spec.masks` it is given, and `apply_masks`
+  is correctly deterministic; the rules just never reached `spec.masks` from any real workflow.
+  Asked the user how mask rules should get attached; chosen approach was an explicit per-transfer
+  picker, not silent auto-attachment by environment. Implemented:
+  - `crates/elm-desktop/src/App.tsx`: the New Transfer wizard now fetches saved masking rules and
+    shows a checkbox table (name, column, algorithm, scope) under a new "Masking" section; nothing
+    is masked unless checked. Rules scoped to the transfer's source or target connection (plus
+    global rules) are pre-checked as a suggestion when those connections change, but the user's
+    own choices are the ones that reach `buildSpec()`'s `masks` field. Verified with `npm run
+    build` (tsc + vite); not exercised through an actual running GUI window (no GUI automation
+    tool was available in this session).
+  - `crates/elm-cli/src/main.rs`: added a repeatable `--mask-rule <id>` flag (comma-separated or
+    repeated) to `elm copy db-to-db|db-to-file|file-to-db`, resolved against `mask.list` and
+    attached to the submitted spec; an unknown id fails closed before submission.
+  Added real test coverage that did not exist at all before this pass (every prior masking test
+  exercised `apply_masks`/`mask_text` directly, never a client-facing operation):
+  - `crates/elm-daemon/tests/masks.rs`: a full `mask.add` → `mask.list` → `mask.test` →
+    `mask.edit` → `mask.list` → `mask.test` → `mask.remove` → `mask.remove` (fails `NotFound`)
+    round trip over real IPC — the exact sequence the desktop "Masking rules" screen and `elm
+    mask ...` drive.
+  - `crates/elm-daemon/tests/masking_resume.rs`: submits one identical `JobSpec` (same job id,
+    same derived seed, same `Random`-algorithm masking rule) twice against a real `elm-daemon`
+    subprocess — once straight through, once killed uncleanly mid-transfer and resumed (matching
+    `process_restart.rs`'s pattern) — and asserts the published output is byte-for-byte identical
+    either way. Run 4 consecutive times to rule out a timing fluke.
+  Verified with `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D
+  warnings`, and `cargo test --workspace --all-features` (0 failures) after these changes.
+  **Not done in this pass**: history filtering as a UI feature, live-progress rendering, and
+  accessibility are untouched; nothing here ran against an actual GUI window.
+- [x] Resolve pause semantics and UI behavior; do not advertise unimplemented actions.
+  Verified 2026-09-17: a repo-wide search (`crates/`, `docs/`, `README.md`, excluding build
+  output) found zero references to "pause" anywhere in the actual product — no `Operation`
+  variant, no `JobState`, no CLI subcommand, no desktop button or copy. Nothing advertises an
+  unimplemented pause action today; there was nothing to remove or disable. The real ambiguity
+  this line was guarding against is more subtle: `cancel` and `resume` can look like a
+  pause/continue pair, but `queue_retry` (`crates/elm-state/src/store.rs`) only allows resuming
+  a job the daemon marked `Interrupted` or `Failed` — a `Cancelled` job can never be resumed, only
+  deleted, and neither the desktop nor the CLI said so anywhere before this pass. Fixed by making
+  that explicit everywhere a user could be confused: the desktop's Cancel button now confirms
+  ("There is no pause: this cannot be resumed afterward...") before acting, and both action
+  buttons carry a `title` explaining what they actually do; `elm jobs cancel --help` and `elm
+  jobs resume --help` (`crates/elm-cli/src/main.rs`) state the same; and `README.md`'s safety
+  model gained an explicit "There is no pause" line. `npm run build`, `cargo fmt --all -- --check`,
+  `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace
+  --all-features` (0 failures) all pass. Not exercised through an actual running GUI window (no
+  GUI automation tool was available in this session).
+- [ ] Test keyboard-only navigation, focus, labels, contrast, and accessibility on all supported platforms.
 - [ ] Test keyboard-only navigation, focus, labels, contrast, and accessibility on all supported platforms.
 
 ## 5. Native platforms and distribution
@@ -249,5 +343,10 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
 - `benchmark-results/`: local ignored measured results (not guaranteed to exist in a fresh clone).
 - `crates/elm-connectors/tests/`, `crates/elm-daemon/tests/`: correctness/recovery tests.
   `crates/elm-daemon/tests/ipc.rs` and `postgres_preview.rs` cover the `job.preview` operation.
+  `crates/elm-daemon/tests/job_lifecycle.rs` covers cancel/delete/reconnect against a real
+  daemon subprocess; `ipc.rs`'s `a_failed_job_carries_an_actionable_remediation_...` test
+  covers actionable failures surviving in history. `crates/elm-daemon/tests/masks.rs` covers
+  the masking-rule CRUD operations; `masking_resume.rs` covers masked output determinism
+  across a real interrupted-and-resumed transfer.
 - `docs/connectors.md`, `docs/operations.md`: current restrictions and recovery behavior; see
   `docs/operations.md`'s "Transfer preview" section for `job.preview`/`--dry-run`.

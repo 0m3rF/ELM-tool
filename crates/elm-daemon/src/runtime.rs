@@ -409,6 +409,7 @@ impl DaemonRuntime {
                 job_id: spec.id,
                 injected_warnings: source_warnings,
             });
+            let cancellation_requested = cancellation.clone();
             let result = execute_job(
                 spec.clone(),
                 checkpoint,
@@ -439,7 +440,14 @@ impl DaemonRuntime {
                     progress.occurred_at = chrono::Utc::now();
                     let _record_result = store.record_progress(&progress);
                 }
-                progress.state = if matches!(error, ElmError::Cancelled) {
+                // A cancellation request can race a batch that was already mid-flight: that
+                // batch's own progress write then loses to `cancel_job`'s `Cancelling` write and
+                // comes back as a state-transition `Conflict`, not `ElmError::Cancelled`. Once
+                // cancellation has been requested, any resulting error reflects that request,
+                // not a genuine failure, so it must still resolve to `Cancelled`.
+                progress.state = if matches!(error, ElmError::Cancelled)
+                    || cancellation_requested.is_cancelled()
+                {
                     JobState::Cancelled
                 } else {
                     JobState::Failed
@@ -471,12 +479,17 @@ impl DaemonRuntime {
         let active_job = active
             .get(&id)
             .ok_or_else(|| ElmError::Conflict("job is not active in this daemon".into()))?;
+        // Flip the in-memory flag before persisting `Cancelling`: a batch that is mid-flight can
+        // race this call and lose the store write (its own progress update conflicts with the
+        // `Cancelling` state that just committed). That losing batch's error handling checks
+        // this same flag to tell a genuine failure from a cancellation artifact, so the flag
+        // must already be visible by the time the `Cancelling` write can possibly be observed.
+        active_job.cancellation.cancel();
         let mut progress = job.progress;
         progress.state = JobState::Cancelling;
         progress.occurred_at = chrono::Utc::now();
         self.store.record_progress(&progress)?;
         let _send_result = active_job.events.send(progress);
-        active_job.cancellation.cancel();
         Ok(Response::Ack)
     }
 

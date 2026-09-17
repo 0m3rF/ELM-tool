@@ -142,11 +142,30 @@ function NewTransfer({ onSubmitted }: { onSubmitted: () => void }) {
   const [previewError, setPreviewError] = useState("");
   const [preview, setPreview] = useState<TransferPreview>();
   const [settings, setSettings] = useState<RuntimeSettings>({ memory_budget_bytes: 512 * 1024 * 1024, batch_target_bytes: 16 * 1024 * 1024 });
+  const [masks, setMasks] = useState<MaskRule[]>([]);
+  const [selectedMaskIds, setSelectedMaskIds] = useState<Set<string>>(new Set());
   useEffect(() => { void invoke<Environment[]>("list_environments").then((items) => {
     setEnvironments(items);
     if (items[0]) { setSourceEnvironment((value) => value || items[0].id); setTargetEnvironment((value) => value || items[0].id); }
   }).catch((value) => setError(String(value))); }, []);
   useEffect(() => { void invoke<RuntimeSettings>("get_settings").then(setSettings).catch((value) => setError(String(value))); }, []);
+  useEffect(() => { void invoke<MaskRule[]>("list_masks").then(setMasks).catch((value) => setError(String(value))); }, []);
+  // Masking is opt-in per transfer: nothing is ever masked unless explicitly checked here. This
+  // only seeds a suggested default (rules scoped to a relevant connection, plus global rules)
+  // whenever the relevant connections change; the user's own checkbox choices are not otherwise
+  // second-guessed.
+  useEffect(() => {
+    setSelectedMaskIds(new Set(
+      masks
+        .filter((rule) => !rule.environment_id || rule.environment_id === sourceEnvironment || rule.environment_id === targetEnvironment)
+        .map((rule) => rule.id)
+    ));
+  }, [masks, sourceEnvironment, targetEnvironment, direction]);
+  const toggleMask = (id: string) => setSelectedMaskIds((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   // Any field that changes what would be transferred invalidates a prior preview: the reviewed
   // columns and publication safety no longer describe what "Submit transfer" would actually run.
   useEffect(() => { setPreview(undefined); setPreviewError(""); }, [
@@ -164,7 +183,9 @@ function NewTransfer({ onSubmitted }: { onSubmitted: () => void }) {
     return {
       version: 1, id: crypto.randomUUID(), name: `${direction} transfer`, source, sink,
       write_mode: writeMode, consistency, memory_budget_bytes: settings.memory_budget_bytes,
-      batch_target_bytes: settings.batch_target_bytes, masks: [], random_seed: Array.from(seed),
+      batch_target_bytes: settings.batch_target_bytes,
+      masks: masks.filter((rule) => selectedMaskIds.has(rule.id)),
+      random_seed: Array.from(seed),
       conversions: [], submitted_at: new Date().toISOString(),
     };
   };
@@ -199,6 +220,23 @@ function NewTransfer({ onSubmitted }: { onSubmitted: () => void }) {
       {direction !== "db-to-file" && <label className="wide">Target table<input required value={targetTable} onChange={(event) => setTargetTable(event.target.value)} placeholder="analytics.customers" /></label>}
       {direction !== "db-to-db" && <><label className="wide">{direction === "file-to-db" ? "Input file path" : "Output file path"}<input required value={filePath} onChange={(event) => setFilePath(event.target.value)} /></label><label>File format<select value={format} onChange={(event) => setFormat(event.target.value as FileFormat)}><option value="csv">CSV</option><option value="ndjson">NDJSON</option><option value="parquet">Parquet</option></select></label></>}
       <label>Write mode<select value={writeMode} onChange={(event) => setWriteMode(event.target.value as JobSpec["write_mode"])}><option value="append">Append</option><option value="replace">Replace</option><option value="fail">Fail if destination exists</option></select></label>
+      <div className="wide">
+        <div className="editor-heading"><h2>Masking</h2></div>
+        {masks.length
+          ? <>
+              <p>No rule is applied unless checked here. Rules scoped to a connection used by this transfer are checked by default.</p>
+              <div className="table-wrap"><table><thead><tr><th /><th>Name</th><th>Column</th><th>Algorithm</th><th>Scope</th></tr></thead><tbody>
+                {masks.map((rule) => <tr key={rule.id}>
+                  <td><input type="checkbox" aria-label={`Apply masking rule ${rule.name}`} checked={selectedMaskIds.has(rule.id)} onChange={() => toggleMask(rule.id)} /></td>
+                  <td>{rule.name}</td>
+                  <td><code>{rule.column}</code></td>
+                  <td>{typeof rule.algorithm === "string" ? rule.algorithm : String(rule.algorithm.algorithm ?? Object.keys(rule.algorithm)[0])}</td>
+                  <td>{environments.find((environment) => environment.id === rule.environment_id)?.name ?? "Global"}</td>
+                </tr>)}
+              </tbody></table></div>
+            </>
+          : <p>No masking rules saved yet. Add one on the Masking rules screen, then come back here to apply it to this transfer.</p>}
+      </div>
       <div className="callout wide"><strong>Publication guarantee</strong><p>The target stays unchanged until staging validation succeeds. ELM will stop if your account cannot publish safely.</p></div>
       <div className="callout warning wide"><strong>Alpha database boundary</strong><p>Database connectors have limited type mappings. PostgreSQL supports keyset resume; other database sources restart from zero. SQL Server requires Driver 18; Oracle requires Instant Client. Oracle uses bounded native array fetching and batch DML staging. Existing Oracle targets support atomic APPEND or explicit non-atomic table-swap REPLACE. A swap retains the old table's indexes, grants, and constraints on its backup, not on the replacement. Backups remain until job deletion. LOB support and large-workload performance qualification remain pending.</p></div>
       <div className="wide">
@@ -256,6 +294,7 @@ function Jobs() {
     return matchesSearch && (!stateFilter || job.progress.state === stateFilter);
   }), [jobs, query, stateFilter]);
   const action = async (id: string, actionName: "cancel" | "resume" | "delete") => {
+    if (actionName === "cancel" && !window.confirm("Cancel this transfer? There is no pause: this cannot be resumed afterward, only deleted. Submit a new transfer to retry it.")) return;
     setError("");
     try { await invoke("job_action", { id, action: actionName }); if (actionName === "delete") setSelected(undefined); await load(); }
     catch (value) { setError(String(value)); }
@@ -277,7 +316,11 @@ function Jobs() {
       <div className="job-detail">{current ? <>
         <h2>{current.spec.name || "Transfer details"}</h2><dl><dt>State</dt><dd>{current.progress.state}</dd><dt>Rows</dt><dd>{current.progress.rows.toLocaleString()}</dd><dt>Attempt</dt><dd>{current.attempt}</dd></dl>
         {current.progress.error && <div className="alert"><strong>{current.progress.error.message}</strong><p>{current.progress.error.remediation}</p></div>}
-        <div className="card-actions"><button disabled={!['queued', 'preflighting', 'running', 'publishing', 'cancelling'].includes(current.progress.state)} onClick={() => void action(current.spec.id, "cancel")}>Cancel</button><button disabled={!['failed', 'interrupted'].includes(current.progress.state)} onClick={() => void action(current.spec.id, "resume")}>Resume</button><button className="danger" disabled={!['succeeded', 'failed', 'cancelled', 'interrupted'].includes(current.progress.state)} onClick={() => void action(current.spec.id, "delete")}>Delete</button></div>
+        <div className="card-actions">
+          <button title="Stops the transfer permanently. There is no pause: it cannot be resumed afterward." disabled={!['queued', 'preflighting', 'running', 'publishing', 'cancelling'].includes(current.progress.state)} onClick={() => void action(current.spec.id, "cancel")}>Cancel</button>
+          <button title={current.progress.state === 'cancelled' ? "A cancelled transfer cannot be resumed; submit a new transfer to retry it." : "Continues from the last durable checkpoint."} disabled={!['failed', 'interrupted'].includes(current.progress.state)} onClick={() => void action(current.spec.id, "resume")}>Resume</button>
+          <button className="danger" disabled={!['succeeded', 'failed', 'cancelled', 'interrupted'].includes(current.progress.state)} onClick={() => void action(current.spec.id, "delete")}>Delete</button>
+        </div>
       </> : <div className="empty"><p>Select a job to inspect checkpoints and recovery details.</p></div>}</div>
     </div>
   </section>;

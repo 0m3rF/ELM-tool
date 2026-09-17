@@ -11,9 +11,10 @@ application.
 > integration tests pass. The experimental Oracle source is wired to the daemon with explicit
 > performance warnings and restart-from-zero recovery. Oracle uses bounded native array fetching
 > and batch DML staging; existing-table REPLACE requires explicit non-atomic `--consistency table-swap`.
-> Native client checks and connection diagnostics are enabled. Desktop connection and masking CRUD, structured
-> job submission and actions, settings persistence, history filtering, and live events are wired;
-> schema preview remains pending. PostgreSQL connection diagnostics, exact Decimal128 conversion,
+> Native client checks and connection diagnostics are enabled. Desktop connection and masking CRUD,
+> an explicit per-transfer masking-rule picker, structured job submission and actions, settings
+> persistence, history filtering, and live events are wired; schema preview remains pending.
+> PostgreSQL connection diagnostics, exact Decimal128 conversion,
 > explicit Arrow conversion rules, and durable file resume are implemented. See the
 > [connector status](docs/connectors.md).
 
@@ -31,12 +32,17 @@ application.
 - Environment metadata, jobs, attempts, checkpoints, and events live in per-user SQLite. Database
   passwords live only in the operating system keychain.
 - Random masking is deterministic from the persisted job seed and batch/row position, so retries
-  produce the same result.
+  produce the same result. Masking is opt-in per transfer: saving a rule has no effect until it is
+  explicitly attached, via the desktop New Transfer wizard's "Masking" step or `elm copy
+  --mask-rule <id>`.
 - File attempts persist committed batches as job-scoped Parquet chunks. Resume validates the input
   fingerprint and continues from the committed logical row without losing or duplicating output.
 - Conversion rules are schema-preflighted. Potentially lossy casts require `allow_lossy` on the
   individual column, and value-level cast failures fail the attempt rather than producing nulls.
 - User SQL is an explicit source and is never extended with identifiers or checkpoint literals.
+- There is no pause action. `cancel` stops a job permanently (it cannot be resumed, only
+  deleted); `resume` only applies to a job the daemon marked `interrupted` (e.g. an unclean
+  daemon stop) or `failed`, and continues from its last durable checkpoint.
 
 The frozen behavior for APPEND, REPLACE, FAIL, empty inputs, cancellation, resume, and redaction is
 in [the correctness contract](docs/correctness-contract.md).
@@ -84,7 +90,7 @@ cargo run -p elm-cli -- env list
 elm daemon start|status|stop
 elm env add|edit|list|test|remove
 elm mask add|edit|list|remove|test
-elm copy db-to-db|db-to-file|file-to-db [--detach]
+elm copy db-to-db|db-to-file|file-to-db [--detach] [--mask-rule <id>,...]
 elm jobs list|show|watch|cancel|resume|delete
 ```
 

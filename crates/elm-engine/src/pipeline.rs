@@ -219,6 +219,14 @@ impl TransferEngine {
             }
         };
 
+        // A cancellation request can become ready in the same `select!` tick as an
+        // already-buffered batch; `select!` does not have to prefer the cancellation branch, so
+        // one more batch can still be processed and fail (e.g. its own `emit(Running)` loses a
+        // race against `cancel_job`'s `Cancelling` write) instead of cleanly observing
+        // `ElmError::Cancelled`. Capture whether cancellation was already requested before this
+        // function's own unconditional self-cancel-on-any-error below would make that
+        // indistinguishable from a genuine failure.
+        let externally_cancelled = self.cancellation.is_cancelled();
         if result.is_err() {
             self.cancellation.cancel();
         }
@@ -228,10 +236,11 @@ impl TransferEngine {
 
         if let Err(error) = result {
             let _abort_result = sink.abort().await;
-            let terminal = if matches!(error, ElmError::Cancelled) {
-                JobState::Cancelled
+            let cancelled = matches!(error, ElmError::Cancelled) || externally_cancelled;
+            let (terminal, error) = if cancelled {
+                (JobState::Cancelled, ElmError::Cancelled)
             } else {
-                JobState::Failed
+                (JobState::Failed, error)
             };
             self.emit(terminal, stats, started, Some(error.to_public()), &warnings)
                 .await?;
@@ -334,12 +343,21 @@ async fn produce_batches(
         let bytes = u64::try_from(batch.get_array_memory_size())
             .unwrap_or(u64::MAX)
             .saturating_mul(reserve_multiplier);
-        let memory = match budget.acquire(bytes).await {
-            Ok(permit) => permit,
-            Err(error) => {
-                let _send_result = tx.send(Err(error)).await;
-                return Ok(());
-            }
+        // Unlike the other awaits in this loop, acquiring memory has no guaranteed upper bound:
+        // it only resolves once enough previously-acquired permits are dropped elsewhere in the
+        // pipeline. Without racing it against cancellation, a cancelled transfer whose consumers
+        // have already stopped draining outstanding batches could leave this task (and the
+        // `join_stage` that awaits it) blocked indefinitely instead of the job ever reaching a
+        // terminal state.
+        let memory = tokio::select! {
+            () = cancellation.cancelled() => return Ok(()),
+            result = budget.acquire(bytes) => match result {
+                Ok(permit) => permit,
+                Err(error) => {
+                    let _send_result = tx.send(Err(error)).await;
+                    return Ok(());
+                }
+            },
         };
         let source_position = match source.checkpoint().await {
             Ok(position) => position,

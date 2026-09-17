@@ -252,7 +252,15 @@ impl StateStore {
 
     pub fn record_progress(&self, progress: &JobProgress) -> Result<()> {
         let mut connection = self.connect()?;
-        let transaction = connection.transaction().map_err(sql_error)?;
+        // Must take the write lock up front (not the default deferred/upgrade behavior): this
+        // transaction reads the current state and then writes based on it, so if two callers
+        // (e.g. a running job's own progress updates and a concurrent job.cancel) both start as
+        // deferred readers, one's later upgrade-to-write can hit an immediate "database is
+        // locked" even with `busy_timeout` set, because WAL only retries a connection that is
+        // still waiting for its *first* write lock, not one whose read snapshot has gone stale.
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(sql_error)?;
         let current: String = transaction
             .query_row(
                 "SELECT state FROM jobs WHERE id = ?1",

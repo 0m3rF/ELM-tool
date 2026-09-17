@@ -247,6 +247,11 @@ struct TransferOptions {
     /// moving any data or creating a job.
     #[arg(long)]
     dry_run: bool,
+    /// Attach a saved masking rule (by id, from `elm mask list`) to this transfer. Repeatable,
+    /// or comma-separated. Masking is opt-in per transfer: a saved rule has no effect on any
+    /// transfer unless named here.
+    #[arg(long = "mask-rule", value_delimiter = ',')]
+    mask_rules: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -342,11 +347,25 @@ impl From<ConsistencyArgument> for ConsistencyMode {
 #[derive(Debug, Subcommand)]
 enum JobsCommand {
     List,
-    Show { id: String },
-    Watch { id: String },
-    Cancel { id: String },
-    Resume { id: String },
-    Delete { id: String },
+    Show {
+        id: String,
+    },
+    Watch {
+        id: String,
+    },
+    /// Stops the job permanently. There is no pause: a cancelled job cannot be resumed, only
+    /// deleted; submit a new transfer to retry it.
+    Cancel {
+        id: String,
+    },
+    /// Resumes a job left `interrupted` (e.g. by a daemon restart) or `failed`, continuing from
+    /// its last durable checkpoint. Not available for a cancelled job.
+    Resume {
+        id: String,
+    },
+    Delete {
+        id: String,
+    },
 }
 
 #[tokio::main]
@@ -609,6 +628,7 @@ async fn handle_copy(
     spec.consistency = options.consistency.into();
     spec.memory_budget_bytes = options.memory_mib.saturating_mul(1024 * 1024);
     spec.batch_target_bytes = options.batch_mib.saturating_mul(1024 * 1024);
+    spec.masks = resolve_mask_rules(client, &options.mask_rules).await?;
     spec.validate()?;
     if options.dry_run {
         let response = client.request(Operation::JobPreview(spec)).await?;
@@ -624,6 +644,32 @@ async fn handle_copy(
         watch_job(client, id, json).await?;
     }
     Ok(())
+}
+
+/// Resolves `--mask-rule` ids against the daemon's saved masking rules. Fails closed on an
+/// unknown id rather than silently submitting a transfer that masks less than the user asked for.
+async fn resolve_mask_rules(
+    client: &DaemonClient,
+    ids: &[String],
+) -> anyhow::Result<Vec<MaskRule>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let saved = match client.request(Operation::MaskList).await? {
+        Response::Masks(rules) => rules,
+        other => anyhow::bail!("expected a masks response to mask.list, got {other:?}"),
+    };
+    ids.iter()
+        .map(|id| {
+            let rule_id = MaskRuleId::from_str(id)
+                .map_err(|_| anyhow::anyhow!("invalid --mask-rule id: {id}"))?;
+            saved
+                .iter()
+                .find(|rule| rule.id == rule_id)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("no saved masking rule with id {id}"))
+        })
+        .collect()
 }
 
 async fn database_source(

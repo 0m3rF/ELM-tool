@@ -2,8 +2,8 @@ use std::{fs, time::Duration};
 
 use elm_connectors::{FileSource, RecoverableFileSink};
 use elm_core::{
-    BatchCheckpoint, ConsistencyMode, DataSink, DataSource, FileFormat, JobSpec, JobState,
-    SinkSpec, SourceSpec, WriteMode,
+    BatchCheckpoint, ConsistencyMode, ConversionRule, DataSink, DataSource, ErrorCode, FileFormat,
+    Identifier, JobSpec, JobState, SinkSpec, SourceSpec, WriteMode,
     protocol::{Operation, Response},
 };
 use elm_daemon::{DaemonClient, DaemonRuntime, RuntimePaths};
@@ -265,6 +265,113 @@ async fn preview_reports_columns_without_moving_data_or_creating_a_job() {
     assert!(!jobs.iter().any(|job| job.spec.id == id));
 
     client
+        .request(Operation::DaemonStop)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    tokio::time::timeout(Duration::from_secs(5), daemon)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+        .unwrap_or_else(|error| panic!("{error}"))
+        .unwrap_or_else(|error| panic!("{error}"));
+}
+
+/// A failure the desktop UI shows must be an actionable `PublicError`, not a bare message, and
+/// that error must still be readable from job history after the job is done (a fresh client
+/// standing in for the window being reopened later) -- not only from the live watch stream.
+#[tokio::test]
+async fn a_failed_job_carries_an_actionable_remediation_that_survives_in_history() {
+    let directory = tempdir().unwrap_or_else(|error| panic!("{error}"));
+    let paths = RuntimePaths::for_data_directory(directory.path().join("state"))
+        .unwrap_or_else(|error| panic!("{error}"));
+    let runtime = DaemonRuntime::open(paths.clone()).unwrap_or_else(|error| panic!("{error}"));
+    let daemon = tokio::spawn(runtime.serve());
+    let client = DaemonClient::connect(paths.clone()).unwrap_or_else(|error| panic!("{error}"));
+
+    let input = directory.path().join("input.csv");
+    let output = directory.path().join("output.ndjson");
+    fs::write(&input, "\"select\"\n1\nnot-a-number\n").unwrap_or_else(|error| panic!("{error}"));
+    let mut spec = JobSpec::new(
+        SourceSpec::File {
+            path: input,
+            format: FileFormat::Csv,
+        },
+        SinkSpec::File {
+            path: output.clone(),
+            format: FileFormat::Ndjson,
+        },
+    );
+    spec.conversions.push(ConversionRule {
+        column: Identifier::new("select").unwrap_or_else(|error| panic!("{error}")),
+        target_type: "int64".into(),
+        allow_lossy: true,
+    });
+    let id = spec.id;
+
+    client
+        .request(Operation::JobSubmit(spec))
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let mut events = client
+        .watch(Operation::JobWatch(id))
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let live_error = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await {
+                Some(Ok(Response::Job(job))) if job.progress.state.is_terminal() => {
+                    return job.progress;
+                }
+                Some(Ok(Response::Event(progress))) if progress.state.is_terminal() => {
+                    return progress;
+                }
+                Some(Ok(_)) => continue,
+                Some(Err(error)) => panic!("{error}"),
+                None => panic!("watch stream closed before a terminal event"),
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("job did not reach a terminal state within 10s"));
+    assert_eq!(live_error.state, JobState::Failed);
+    let error = live_error
+        .error
+        .unwrap_or_else(|| panic!("a failed job must carry a PublicError"));
+    assert_eq!(error.code, ErrorCode::TypeMapping);
+    assert_eq!(
+        error.remediation.as_deref(),
+        Some("Add an explicit conversion rule for the affected column.")
+    );
+    assert!(
+        !output.exists(),
+        "a failed conversion must not leave a partial target"
+    );
+
+    // A new client (the window reopened later) must still see the same actionable error
+    // when browsing job history, not just live watchers connected at failure time.
+    let reopened = DaemonClient::connect(paths.clone()).unwrap_or_else(|error| panic!("{error}"));
+    let jobs = match reopened
+        .request(Operation::JobList)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+    {
+        Response::Jobs(jobs) => jobs,
+        other => panic!("expected a jobs response, got {other:?}"),
+    };
+    let historical = jobs
+        .into_iter()
+        .find(|job| job.spec.id == id)
+        .unwrap_or_else(|| panic!("expected the failed job to remain in history"));
+    assert_eq!(historical.progress.state, JobState::Failed);
+    let historical_error = historical.progress.error.unwrap_or_else(|| {
+        panic!("history must retain the actionable error, not just live events")
+    });
+    assert_eq!(historical_error.code, ErrorCode::TypeMapping);
+    assert_eq!(
+        historical_error.remediation.as_deref(),
+        Some("Add an explicit conversion rule for the affected column.")
+    );
+
+    reopened
         .request(Operation::DaemonStop)
         .await
         .unwrap_or_else(|error| panic!("{error}"));
