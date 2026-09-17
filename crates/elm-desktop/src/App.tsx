@@ -170,7 +170,7 @@ function NewTransfer({ onSubmitted }: { onSubmitted: () => void }) {
   // columns and publication safety no longer describe what "Submit transfer" would actually run.
   useEffect(() => { setPreview(undefined); setPreviewError(""); }, [
     direction, sourceEnvironment, targetEnvironment, sourceValue, sourceIsQuery,
-    targetTable, filePath, format, writeMode, consistency,
+    targetTable, filePath, format, writeMode, consistency, selectedMaskIds,
   ]);
   const buildSpec = (): JobSpec => {
     const source: SourceSpec = direction === "file-to-db"
@@ -206,6 +206,15 @@ function NewTransfer({ onSubmitted }: { onSubmitted: () => void }) {
     finally { setSubmitting(false); }
   };
   const reviewed = Boolean(preview) && !preview?.publication_error;
+  const duplicateMaskColumns = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const rule of masks) {
+      if (!selectedMaskIds.has(rule.id)) continue;
+      counts.set(rule.column, (counts.get(rule.column) ?? 0) + 1);
+    }
+    return [...counts.entries()].filter(([, count]) => count > 1).map(([column]) => column);
+  }, [masks, selectedMaskIds]);
+  const hasMaskConflict = duplicateMaskColumns.length > 0;
   return <section>
     <Header eyebrow="Transfer wizard" title="New transfer" detail="Preflight catches unsafe privileges and lossy mappings before data moves." />
     {error && <div role="alert" className="alert">{error}</div>}
@@ -225,6 +234,7 @@ function NewTransfer({ onSubmitted }: { onSubmitted: () => void }) {
         {masks.length
           ? <>
               <p>No rule is applied unless checked here. Rules scoped to a connection used by this transfer are checked by default.</p>
+              {hasMaskConflict && <div role="alert" className="alert">Only one masking rule can apply per column: uncheck one of the rules for {duplicateMaskColumns.map((column) => <code key={column}>{column}</code>)}. The last-checked rule would otherwise silently win.</div>}
               <div className="table-wrap"><table><thead><tr><th /><th>Name</th><th>Column</th><th>Algorithm</th><th>Scope</th></tr></thead><tbody>
                 {masks.map((rule) => <tr key={rule.id}>
                   <td><input type="checkbox" aria-label={`Apply masking rule ${rule.name}`} checked={selectedMaskIds.has(rule.id)} onChange={() => toggleMask(rule.id)} /></td>
@@ -240,7 +250,7 @@ function NewTransfer({ onSubmitted }: { onSubmitted: () => void }) {
       <div className="callout wide"><strong>Publication guarantee</strong><p>The target stays unchanged until staging validation succeeds. ELM will stop if your account cannot publish safely.</p></div>
       <div className="callout warning wide"><strong>Alpha database boundary</strong><p>Database connectors have limited type mappings. PostgreSQL supports keyset resume; other database sources restart from zero. SQL Server requires Driver 18; Oracle requires Instant Client. Oracle uses bounded native array fetching and batch DML staging. Existing Oracle targets support atomic APPEND or explicit non-atomic table-swap REPLACE. A swap retains the old table's indexes, grants, and constraints on its backup, not on the replacement. Backups remain until job deletion. LOB support and large-workload performance qualification remain pending.</p></div>
       <div className="wide">
-        <div className="editor-heading"><h2>4. Review</h2><button type="button" onClick={() => void runPreview()} disabled={previewing}>{previewing ? "Checking…" : "Run preview"}</button></div>
+        <div className="editor-heading"><h2>4. Review</h2><button type="button" onClick={() => void runPreview()} disabled={previewing || hasMaskConflict} title={hasMaskConflict ? "Resolve the conflicting masking rules above first" : undefined}>{previewing ? "Checking…" : "Run preview"}</button></div>
         {previewError && <div role="alert" className="alert">{previewError}</div>}
         {preview && <div className="panel">
           <table><thead><tr><th>Column</th><th>Source type</th><th>Destination type</th><th>Nullable</th></tr></thead><tbody>
@@ -253,7 +263,7 @@ function NewTransfer({ onSubmitted }: { onSubmitted: () => void }) {
         </div>}
         {!preview && !previewError && <p>Run a preview to see the destination columns and confirm the requested write mode and consistency are safe, before any data moves.</p>}
       </div>
-      <div className="wide footer-actions"><button className="primary" type="submit" disabled={submitting || !reviewed} title={reviewed ? undefined : "Run a preview that passes before submitting"}>{submitting ? "Submitting…" : "Submit transfer"}</button></div>
+      <div className="wide footer-actions"><button className="primary" type="submit" disabled={submitting || !reviewed || hasMaskConflict} title={hasMaskConflict ? "Resolve the conflicting masking rules above first" : reviewed ? undefined : "Run a preview that passes before submitting"}>{submitting ? "Submitting…" : "Submit transfer"}</button></div>
     </form>
   </section>;
 }

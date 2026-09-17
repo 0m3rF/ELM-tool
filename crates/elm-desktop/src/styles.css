@@ -5,7 +5,8 @@ button, input, select { font: inherit; }
 button { border: 1px solid #cbd4df; background: #fff; color: #243247; border-radius: 8px; padding: .65rem .9rem; cursor: pointer; }
 button:hover { border-color: #6883a4; }
 button:disabled { opacity: .6; cursor: not-allowed; }
-button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #9cc8ff; outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
+aside :focus-visible { outline-color: #9cc8ff; }
 .app-shell { display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }
 aside { background: #0b1625; color: #dae6f3; padding: 28px 18px; display: flex; flex-direction: column; }
 .brand { display: flex; align-items: center; gap: 12px; padding: 0 10px 32px; }
@@ -14,7 +15,7 @@ aside { background: #0b1625; color: #dae6f3; padding: 28px 18px; display: flex; 
 nav { display: grid; gap: 7px; }
 nav button { border: 0; background: transparent; color: #aebed0; display: flex; justify-content: space-between; align-items: center; padding: 12px; text-align: left; }
 nav button.active { background: #182a3f; color: white; }
-kbd { font-size: .68rem; color: #61758d; }
+kbd { font-size: .68rem; color: #8ea0b8; }
 .safety-note { margin-top: auto; padding: 14px 10px; color: #8fa3b9; font-size: .78rem; display: flex; align-items: center; gap: 8px; }
 .status-dot { width: 8px; height: 8px; border-radius: 99px; background: #40d9a2; box-shadow: 0 0 0 4px #40d9a222; }
 main { padding: 48px clamp(30px, 5vw, 72px); overflow: auto; }
@@ -23,11 +24,11 @@ main { padding: 48px clamp(30px, 5vw, 72px); overflow: auto; }
 .filters input { min-width: 260px; }.filters select { width: auto; min-width: 150px; }
 .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }.card, .panel, .job-list, .job-detail, .table-wrap { background: white; border: 1px solid #dde3eb; border-radius: 13px; box-shadow: 0 4px 16px #2030400a; }.card { padding: 20px; }.card-title { display: flex; align-items: start; justify-content: space-between; gap: 12px; }.card h2 { margin: 0; font-size: 1.15rem; }.card p { color: #657286; }.card-actions { margin: 22px 0 0; }
 .pill, .state { border-radius: 999px; padding: 4px 8px; font-size: .72rem; background: #eaf0f7; color: #486079; text-transform: capitalize; }.state.running, .state.publishing { background: #dff6ed; color: #0b684c; }.state.failed, .state.cancelled { background: #fde8e7; color: #a22d2a; }.state.succeeded { background: #ddf5e5; color: #176b36; }.state.interrupted { background: #fff1d6; color: #895b00; }
-.empty { padding: 50px 30px; color: #778398; text-align: center; border: 1px dashed #cbd4df; border-radius: 13px; }.empty h2 { color: #28374b; font-size: 1.1rem; }
+.empty { padding: 50px 30px; color: #5b6b80; text-align: center; border: 1px dashed #cbd4df; border-radius: 13px; }.empty h2 { color: #28374b; font-size: 1.1rem; }
 .wizard-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; color: #7a8799; margin-bottom: 14px; font-size: .82rem; }.wizard-steps > * { padding: 10px 12px; border-top: 3px solid #ccd5df; }.wizard-steps b { color: #126e53; border-color: #22a579; }
 .panel { padding: 24px; }.two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }.wide { grid-column: 1 / -1; }label { display: grid; gap: 7px; color: #425168; font-weight: 650; font-size: .84rem; }input, select { width: 100%; border: 1px solid #cbd4df; border-radius: 8px; padding: 11px 12px; background: #fff; color: #172033; }.callout { padding: 15px 17px; background: #eff8f4; border-left: 3px solid #23a67b; border-radius: 7px; }.callout p { color: #526c63; margin: 5px 0 0; font-weight: 400; }.footer-actions { justify-content: flex-end; margin: 0; }
 .callout.warning { background: #fff7e5; border-left-color: #d29216; }.callout.warning p { color: #765d2b; }.checkbox { display: flex; align-items: center; gap: 8px; font-weight: 500; }.checkbox input { width: auto; }
-.split-panel { display: grid; grid-template-columns: minmax(420px, 1.3fr) minmax(260px, .7fr); gap: 16px; }.job-list { padding: 7px; }.job-list > button { width: 100%; border: 0; display: grid; grid-template-columns: 1fr auto; gap: 7px 14px; text-align: left; padding: 14px; }.job-list > button.selected { background: #f0f6f4; }.job-list span:first-child { display: grid; gap: 4px; }.job-list small { color: #768397; }.job-list progress { width: 100%; accent-color: #1c9871; }.job-detail { padding: 22px; }.job-detail h2 { margin-top: 0; }.job-detail dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.job-detail dt { color: #718096; }.job-detail dd { margin: 0; text-align: right; font-weight: 700; }
+.split-panel { display: grid; grid-template-columns: minmax(420px, 1.3fr) minmax(260px, .7fr); gap: 16px; }.job-list { padding: 7px; }.job-list > button { width: 100%; border: 0; display: grid; grid-template-columns: 1fr auto; gap: 7px 14px; text-align: left; padding: 14px; }.job-list > button.selected { background: #f0f6f4; }.job-list span:first-child { display: grid; gap: 4px; }.job-list small { color: #5b6b80; }.job-list progress { width: 100%; accent-color: #1c9871; }.job-detail { padding: 22px; }.job-detail h2 { margin-top: 0; }.job-detail dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.job-detail dt { color: #5b6b80; }.job-detail dd { margin: 0; text-align: right; font-weight: 700; }
 .alert { background: #fff1ef; border: 1px solid #f1bcb6; color: #8c2e26; padding: 13px 15px; border-radius: 8px; margin-bottom: 18px; }.alert p { margin-bottom: 0; }
 .success { background: #e5f7ef; border: 1px solid #a8dec9; color: #126246; padding: 13px 15px; border-radius: 8px; margin-bottom: 18px; }
 .editor { margin-bottom: 22px; display: grid; gap: 22px; }.editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }.editor-heading h2 { margin: 0; font-size: 1.2rem; }.editor label small { color: #788598; font-weight: 400; }.danger { color: #9a2e29; border-color: #e5bab7; }.danger:hover { background: #fff2f1; border-color: #d9827b; }.row-actions { display: flex; gap: 7px; }

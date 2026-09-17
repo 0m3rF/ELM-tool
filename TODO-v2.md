@@ -166,6 +166,32 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
   masking rules, oversized batch settings) were added, and none of this was exercised through
   an actual running GUI window in this session (no GUI automation tool was available), only
   through the daemon/CLI layer and a `tsc`/`vite` build of the frontend.
+
+  Follow-up on 2026-09-17: investigated both callouts from the note above.
+  - Oversized batch settings: not a real gap. `RuntimeSettings::validate` (`crates/elm-core/src/
+    types.rs`) already fails closed if `memory_budget_bytes` can't hold at least two target
+    batches, and it's invoked from `JobSpec::validate` on every submission path (`elm-state`,
+    `elm-cli`, `elm-engine::pipeline`, `elm-daemon::preview_job`). The desktop's own Settings
+    screen can't construct an invalid combination in the first place — memory is a 128-2048 MiB
+    range and batch is an 8/16/32 MiB fixed choice, so batch is always well under half the
+    minimum budget. Nothing to fix.
+  - Duplicate masking rules: a real, previously unverified gap, confirmed by reading
+    `apply_masks` (`crates/elm-core/src/masking.rs`): it applies rules in order and overwrites
+    the same column index for each match, so selecting two masking rules for one column silently
+    discards the first and keeps only the last, with no warning anywhere. Fixed at the root
+    (`JobSpec::validate` in `crates/elm-core/src/types.rs`), so every entry point (CLI, daemon
+    preview, daemon submit, and the engine's own pre-run check) now rejects a spec with more
+    than one masking rule targeting the same column, naming the column in the error. Added
+    `types::tests::duplicate_masked_column_is_rejected`. Also added a client-side pre-check in
+    the desktop wizard (`crates/elm-desktop/src/App.tsx`): a computed `hasMaskConflict` disables
+    both "Run preview" and "Submit transfer" and shows an inline alert naming the conflicting
+    column(s) the moment two checked rules collide, instead of waiting for a server round trip;
+    toggling masks now also invalidates a prior preview, matching the wizard's existing "any
+    field that changes what would be transferred invalidates the preview" rule (mask selection
+    was missing from that invalidation list before this pass). Verified with `cargo fmt --all --
+    check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace
+    --all-features` (0 failures), and `npm run build` (tsc + vite, passes). Not exercised through
+    an actual running GUI window (no GUI automation tool was available in this session).
 - [ ] Test live progress, close/reconnect, cancellation, resume/restart, history filtering, and actionable failures.
   Partial pass on 2026-09-17, daemon/IPC layer only (the desktop command surface is a thin
   passthrough to these same operations, but no GUI automation tool was available in this
@@ -263,7 +289,33 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
   --all-features` (0 failures) all pass. Not exercised through an actual running GUI window (no
   GUI automation tool was available in this session).
 - [ ] Test keyboard-only navigation, focus, labels, contrast, and accessibility on all supported platforms.
-- [ ] Test keyboard-only navigation, focus, labels, contrast, and accessibility on all supported platforms.
+  Partial pass on 2026-09-17, static-code audit only (no GUI automation tool or screen reader was
+  available in this session, so nothing here ran against an actual running GUI window or assistive
+  technology). Reviewed `crates/elm-desktop/src/App.tsx` and `styles.css`: every interactive
+  control is a native `<button>`/`<input>`/`<select>`/`<label>` (no custom widgets, no `tabindex`
+  hacks), so Tab order follows DOM order and all controls are reachable and operable from the
+  keyboard already; screen-reader affordances (`role="alert"`/`role="status"` on error/success
+  banners, `aria-label` on icon-only and filter controls, `aria-current` on the active nav item)
+  were already present.
+  Computed actual WCAG relative-luminance contrast ratios for every foreground/background color
+  pair in `styles.css` (script not committed; ad hoc verification, reproducible from the formula
+  in WCAG 2.x SC 1.4.3/1.4.11) and found five real, previously unverified failures, all fixed:
+  - The global `:focus-visible` outline (`#9cc8ff`) was only 1.73:1 against the white/light
+    backgrounds used by nearly every button, input, and select in the app — well under the 3:1
+    non-text-contrast minimum, meaning keyboard focus was barely visible outside the dark sidebar.
+    Changed the default outline to `#1d4ed8` (6.70:1 on white) and kept `#9cc8ff` as an
+    `aside :focus-visible` override, since it already passes (10.49:1) on the dark sidebar
+    background where the darker blue would fail.
+  - Four secondary-text colors were below the 4.5:1 normal-text minimum: `.job-list small`
+    (3.84:1), `.empty` paragraph text (3.57:1), `.job-detail dt` (4.02:1), and the dark-sidebar
+    `kbd` shortcut hints (3.84:1). Darkened the first three to `#5b6b80` (5.07-5.44:1) and
+    lightened `kbd` to `#8ea0b8` (6.81:1 on the dark sidebar).
+  All other checked pairs (nav text, callout text, card text, pill/state badges) already passed.
+  Verified with `npm run build` (tsc + vite, passes) after the change. **Not done**: no actual
+  screen reader (NVDA/JAWS/VoiceOver/Orca) was run against the app, no real keyboard-only walk-
+  through of a live window happened, and platform-specific accessibility behavior (Windows
+  Narrator, macOS VoiceOver, Linux Orca/AT-SPI) is entirely unverified — this line stays open
+  until that happens on each supported platform.
 
 ## 5. Native platforms and distribution
 

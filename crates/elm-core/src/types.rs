@@ -1,4 +1,4 @@
-use std::{fmt, path::PathBuf, str::FromStr, time::Duration};
+use std::{collections::HashSet, fmt, path::PathBuf, str::FromStr, time::Duration};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -376,6 +376,16 @@ impl JobSpec {
                 "source and destination file must be different".into(),
             ));
         }
+        let mut masked_columns = HashSet::with_capacity(self.masks.len());
+        for rule in &self.masks {
+            if !masked_columns.insert(rule.column.as_str()) {
+                return Err(ElmError::Validation(format!(
+                    "more than one masking rule targets column '{}'; apply_masks would silently \
+                     use only the last one, so select at most one masking rule per column",
+                    rule.column
+                )));
+            }
+        }
         Ok(())
     }
 }
@@ -532,6 +542,40 @@ mod tests {
             relation: relation("target"),
         };
         assert!(JobSpec::new(source, sink).validate().is_err());
+    }
+
+    #[test]
+    fn duplicate_masked_column_is_rejected() {
+        let source = SourceSpec::File {
+            path: PathBuf::from("in.csv"),
+            format: FileFormat::Csv,
+        };
+        let sink = SinkSpec::File {
+            path: PathBuf::from("out.csv"),
+            format: FileFormat::Csv,
+        };
+        let mut spec = JobSpec::new(source, sink);
+        let column = Identifier::new("email").unwrap_or_else(|error| panic!("{error}"));
+        spec.masks = vec![
+            MaskRule {
+                id: MaskRuleId::new(),
+                name: "star email".into(),
+                column: column.clone(),
+                algorithm: MaskAlgorithm::Star,
+                environment_id: None,
+            },
+            MaskRule {
+                id: MaskRuleId::new(),
+                name: "nullify email".into(),
+                column,
+                algorithm: MaskAlgorithm::Nullify,
+                environment_id: None,
+            },
+        ];
+        match spec.validate() {
+            Ok(()) => panic!("duplicate masked column must fail closed"),
+            Err(error) => assert!(error.to_string().contains("email")),
+        }
     }
 
     #[test]
