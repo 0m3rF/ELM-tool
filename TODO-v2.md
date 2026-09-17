@@ -366,6 +366,23 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
 - [ ] Run Windows/macOS/Linux native database-driver and OS-keychain acceptance, including Oracle and ODBC setup failures.
 - [ ] Verify TLS/certificate validation and credentials containing URL metacharacters.
 - [ ] Build and smoke-test standalone CLI/daemon plus Windows installers, macOS DMGs, Linux AppImage/deb.
+  Partial pass on 2026-09-17, Windows CLI/daemon binaries only. `cargo build --release -p elm-cli
+  -p elm-daemon` produced `elm.exe` (2.3 MB) and `elm-daemon.exe` (28.7 MB); copied both, alone,
+  to a scratch directory outside the repo and Cargo's environment to confirm they're genuinely
+  standalone (no missing DLL, no reliance on a `cargo run` working directory). `elm.exe --help`/
+  `--version` and every subcommand's `--help` ran cleanly. `elm-daemon.exe --data-directory
+  <scratch>/data` was started as a real background OS process from that scratch directory: it
+  created `elm-v2.sqlite3`, `daemon.token`, and `daemon.lock` in the isolated directory, stayed
+  alive, and stopped cleanly on termination with nothing in stderr. Did **not** run any stateful
+  `elm.exe` subcommand (`env add`, `daemon start`, `copy`, ...): the CLI has no `--data-directory`
+  override (`elm-daemon.exe` does; `elm.exe` doesn't), so any stateful command would have written
+  to this machine's real per-user ELM Tool data directory rather than the isolated one, which
+  this session has no standing authorization to create or modify. **Not done**: the actual
+  Windows installer, macOS DMG, and Linux AppImage/deb are all unbuilt — `tauri.conf.json` has
+  `"bundle": {"active": false}`, so `cargo tauri build` would not produce an installer as
+  configured today, and enabling/configuring bundling (installer format, icons, metadata) is a
+  product decision this pass didn't make unilaterally. No macOS or Linux hardware was available
+  either way.
 - [ ] Configure and verify platform signing/notarization; updater signing is not OS code signing.
 - [ ] Test install/upgrade/uninstall and daemon lifecycle without losing jobs or credentials.
 
