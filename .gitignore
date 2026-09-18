@@ -22,6 +22,8 @@ daemon.lock
 .env
 .env.*
 !.env.example
+# Semgrep Guardian plugin session state (contains live OAuth tokens; never commit)
+.semgrep/
 
 # Editors and operating systems
 .vscode/
