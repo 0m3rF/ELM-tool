@@ -397,6 +397,30 @@ Oracle existing-table REPLACE uses the explicitly approved **non-atomic table sw
   this host doesn't have and installing wasn't requested); macOS and Linux native (non-Docker)
   acceptance; and ODBC setup-failure scenarios specifically.
 
+  Follow-up on 2026-09-18: the user installed ODBC Driver 18 for SQL Server themselves (this
+  session's own `winget`/`msiexec` attempts had failed — see the native-provisioning follow-up
+  below). Extended native Windows acceptance to SQL Server:
+  - The full ignored `crates/elm-connectors/tests/sql_server.rs` suite (11 tests) ran natively on
+    Windows against a dedicated `mcr.microsoft.com/mssql/server:2022-latest` container (`elm_test`
+    database, matching the suite's hardcoded default), with `ELM_TEST_SQL_SERVER_SSL_MODE=disable`
+    for the fixture's self-signed cert. First attempt failed all 11 with a generic connection
+    error; root-caused with a direct `System.Data.Odbc` connection test outside the suite: on this
+    host, `localhost` resolves to IPv6 `::1` first, but Docker's port publish
+    (`127.0.0.1:1433->1433/tcp`) only binds IPv4, so the driver's IPv6 attempt was actively
+    refused — a local test-fixture quirk (host resolution order), not a product bug. Set
+    `ELM_TEST_SQL_SERVER_HOST=127.0.0.1` explicitly and all 11 passed.
+  - Added `crates/elm-daemon/tests/native_client_status.rs` (ignored, Windows-only): starts an
+    in-process daemon and confirms `Operation::NativeClientStatus` reports SQL Server as actually
+    `present` now that the driver is installed, and both Oracle and SQL Server as `provisionable`
+    on Windows — real evidence the new provisioning protocol reflects genuine host state, not a
+    placeholder.
+  Fixture and container torn down afterward. `cargo fmt`, `cargo clippy --workspace --all-targets
+  --all-features -- -D warnings`, and `cargo test --workspace --all-features` (0 failures) all
+  pass. **Still not done**: Oracle native-Windows acceptance (no Oracle Instant Client installed
+  on this host — provisioning it is implemented and separately tested, see below, but the full
+  `oracle.rs` connector suite against a live Oracle fixture wasn't run natively on Windows in this
+  pass); macOS and Linux native acceptance; ODBC setup-failure scenarios specifically.
+
   Follow-up on 2026-09-17-18: this session tried installing ODBC Driver 18 via `winget` to close
   the gap above, and it hung for ~20 minutes with no progress before failing — a real, product-
   relevant pain point, not just friction in this session. The user then set explicit product
